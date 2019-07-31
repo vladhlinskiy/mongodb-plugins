@@ -30,10 +30,9 @@ public class MongoDBSourceConfigTest {
 
   private static final Schema VALID_SCHEMA =
     Schema.recordOf("schema",
-                    Schema.Field.of("int_field", Schema.nullableOf(Schema.of(Schema.Type.STRING))),
+                    Schema.Field.of("int_field", Schema.nullableOf(Schema.of(Schema.Type.INT))),
                     Schema.Field.of("long_field", Schema.nullableOf(Schema.of(Schema.Type.LONG))),
                     Schema.Field.of("double_field", Schema.nullableOf(Schema.of(Schema.Type.DOUBLE))),
-                    Schema.Field.of("float_field", Schema.nullableOf(Schema.of(Schema.Type.FLOAT))),
                     Schema.Field.of("string_field", Schema.nullableOf(Schema.of(Schema.Type.STRING))),
                     Schema.Field.of("boolean_field", Schema.nullableOf(Schema.of(Schema.Type.BOOLEAN))),
                     Schema.Field.of("bytes_field", Schema.nullableOf(Schema.of(Schema.Type.BYTES))),

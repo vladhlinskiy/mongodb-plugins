@@ -21,19 +21,24 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.mongodb.BasicDBObject;
 import com.mongodb.MongoClient;
-import com.mongodb.ServerAddress;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.MongoIterable;
 import com.mongodb.hadoop.MongoInputFormat;
 import com.mongodb.hadoop.input.MongoInputSplit;
 import com.mongodb.hadoop.splitter.MongoSplitter;
-import com.mongodb.hadoop.splitter.StandaloneMongoSplitter;
+import de.flapdoodle.embed.mongo.MongodExecutable;
+import de.flapdoodle.embed.mongo.MongodProcess;
+import de.flapdoodle.embed.mongo.MongodStarter;
+import de.flapdoodle.embed.mongo.config.IMongodConfig;
+import de.flapdoodle.embed.mongo.config.MongodConfigBuilder;
+import de.flapdoodle.embed.mongo.config.Net;
 import de.flapdoodle.embed.mongo.distribution.Version;
-import de.flapdoodle.embed.mongo.tests.MongodForTestsFactory;
+import de.flapdoodle.embed.process.runtime.Network;
 import io.cdap.cdap.api.artifact.ArtifactRange;
 import io.cdap.cdap.api.artifact.ArtifactSummary;
 import io.cdap.cdap.api.artifact.ArtifactVersion;
+import io.cdap.cdap.api.common.Bytes;
 import io.cdap.cdap.api.data.format.StructuredRecord;
 import io.cdap.cdap.api.data.schema.Schema;
 import io.cdap.cdap.api.dataset.table.Table;
@@ -55,16 +60,27 @@ import io.cdap.cdap.proto.id.NamespaceId;
 import io.cdap.cdap.test.ApplicationManager;
 import io.cdap.cdap.test.DataSetManager;
 import io.cdap.cdap.test.WorkflowManager;
+import io.cdap.plugin.ErrorHandling;
 import io.cdap.plugin.MongoDBConstants;
 import io.cdap.plugin.batch.sink.MongoDBBatchSink;
 import io.cdap.plugin.batch.source.MongoDBBatchSource;
 import io.cdap.plugin.common.Constants;
 import org.bson.BsonArray;
+import org.bson.BsonBinary;
+import org.bson.BsonBoolean;
+import org.bson.BsonDateTime;
+import org.bson.BsonDecimal128;
 import org.bson.BsonDocument;
 import org.bson.BsonDouble;
 import org.bson.BsonInt32;
+import org.bson.BsonInt64;
+import org.bson.BsonNull;
+import org.bson.BsonObjectId;
 import org.bson.BsonString;
+import org.bson.BsonValue;
 import org.bson.Document;
+import org.bson.types.Decimal128;
+import org.bson.types.ObjectId;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -74,8 +90,10 @@ import org.junit.Test;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * Unit Tests for {@link MongoDBBatchSource} and {@link MongoDBBatchSink}.
@@ -96,6 +114,7 @@ public class MongoDBTest extends HydratorTestBase {
   private static final String MONGO_DB = "cdap";
   private static final String MONGO_SOURCE_COLLECTIONS = "stocks";
   private static final String MONGO_SINK_COLLECTIONS = "copy";
+  private static final String MONGO_SUPPORTED_DATA_TYPES_COLLECTIONS = "alltypes";
 
   private static final Schema SINK_BODY_SCHEMA = Schema.recordOf(
     "event",
@@ -124,7 +143,59 @@ public class MongoDBTest extends HydratorTestBase {
       .append("agents", new BsonArray(Arrays.asList(new BsonString("a1"), new BsonString("a2"))))
   );
 
-  private MongodForTestsFactory factory = null;
+  private static final Schema SUPPORTED_DATA_TYPES_SCHEMA = Schema.recordOf(
+    "document",
+    Schema.Field.of("_id", Schema.of(Schema.Type.STRING)),
+    Schema.Field.of("string", Schema.of(Schema.Type.STRING)),
+    Schema.Field.of("int32", Schema.of(Schema.Type.INT)),
+    Schema.Field.of("double", Schema.of(Schema.Type.DOUBLE)),
+    Schema.Field.of("array",  Schema.arrayOf(Schema.nullableOf(Schema.of(Schema.Type.STRING)))),
+    Schema.Field.of("object", Schema.recordOf("", Schema.Field.of("inner_field", Schema.of(Schema.Type.STRING)))),
+    Schema.Field.of("object-to-map", Schema.mapOf(Schema.of(Schema.Type.STRING), Schema.of(Schema.Type.STRING))),
+    Schema.Field.of("binary", Schema.of(Schema.Type.BYTES)),
+    Schema.Field.of("boolean", Schema.of(Schema.Type.BOOLEAN)),
+    Schema.Field.of("date", Schema.of(Schema.LogicalType.TIMESTAMP_MILLIS)),
+    Schema.Field.of("null", Schema.nullableOf(Schema.of(Schema.Type.DOUBLE))),
+    Schema.Field.of("long", Schema.of(Schema.Type.LONG)),
+    Schema.Field.of("decimal", Schema.decimalOf(20, 10))
+  );
+
+  private static final List<BsonDocument> SUPPORTED_DATA_TYPES_TEST_DOCUMENTS = Arrays.asList(
+    new BsonDocument()
+      .append("_id", new BsonObjectId(new ObjectId("5d079ee6d078c94008e4bb3a")))
+      .append("string", new BsonString("AAPL"))
+      .append("int32", new BsonInt32(Integer.MIN_VALUE))
+      .append("double", new BsonDouble(Double.MIN_VALUE))
+      .append("array", new BsonArray(Arrays.asList(new BsonString("a1"), new BsonString("a2"))))
+      .append("object", new BsonDocument().append("inner_field", new BsonString("val")))
+      .append("object-to-map", new BsonDocument().append("key", new BsonString("value")))
+      .append("binary", new BsonBinary("binary data".getBytes()))
+      .append("boolean", new BsonBoolean(false))
+      .append("date", new BsonDateTime(System.currentTimeMillis()))
+      .append("null", new BsonNull())
+      .append("long", new BsonInt64(Long.MIN_VALUE))
+      .append("decimal", new BsonDecimal128(Decimal128.parse("987654321.1234567890"))),
+
+    new BsonDocument()
+      .append("_id", new BsonObjectId())
+      .append("string", new BsonString("AAPL"))
+      .append("int32", new BsonInt32(10))
+      .append("double", new BsonDouble(23.23))
+      .append("array", new BsonArray(Arrays.asList(new BsonString("a1"), new BsonString("a2"))))
+      .append("object", new BsonDocument().append("inner_field", new BsonString("val")))
+      .append("object-to-map", new BsonDocument().append("key", new BsonString("value")))
+      .append("binary", new BsonBinary("binary data".getBytes()))
+      .append("boolean", new BsonBoolean(false))
+      .append("date", new BsonDateTime(System.currentTimeMillis()))
+      .append("null", new BsonNull())
+      .append("long", new BsonInt64(Long.MAX_VALUE))
+      .append("decimal", new BsonDecimal128(Decimal128.parse("0.1234567890")))
+    );
+
+  private static final MongodStarter starter = MongodStarter.getDefaultInstance();
+  private MongodExecutable mongodExecutable;
+  private MongodProcess mongod;
+  private MongoClient mongoClient;
   private int mongoPort;
 
   @BeforeClass
@@ -141,10 +212,15 @@ public class MongoDBTest extends HydratorTestBase {
   @Before
   public void beforeTest() throws Exception {
     // Start an embedded mongodb server
-    factory = MongodForTestsFactory.with(Version.Main.V3_1);
-    MongoClient mongoClient = factory.newMongo();
-    List<ServerAddress> serverAddressList = mongoClient.getAllAddress();
-    mongoPort = serverAddressList.get(0).getPort();
+    mongoPort = Network.getFreeServerPort();
+    IMongodConfig mongodConfig = new MongodConfigBuilder()
+      .version(Version.Main.V4_0)
+      .net(new Net("localhost", mongoPort, Network.localhostIsIPv6()))
+      .build();
+    mongodExecutable = starter.prepare(mongodConfig);
+    mongod = mongodExecutable.start();
+
+    mongoClient = new MongoClient("localhost", mongoPort);
     mongoClient.dropDatabase(MONGO_DB);
     MongoDatabase mongoDatabase = mongoClient.getDatabase(MONGO_DB);
     MongoIterable<String> collections = mongoDatabase.listCollectionNames();
@@ -153,12 +229,21 @@ public class MongoDBTest extends HydratorTestBase {
     MongoDatabase db = mongoClient.getDatabase(MONGO_DB);
     MongoCollection dbCollection = db.getCollection(MONGO_SOURCE_COLLECTIONS, BsonDocument.class);
     dbCollection.insertMany(TEST_DOCUMENTS);
+
+    // Prepare supported data types
+    mongoDatabase.createCollection(MONGO_SUPPORTED_DATA_TYPES_COLLECTIONS);
+    MongoCollection allDataTypesCollection = db.getCollection(MONGO_SUPPORTED_DATA_TYPES_COLLECTIONS,
+                                                              BsonDocument.class);
+    allDataTypesCollection.insertMany(SUPPORTED_DATA_TYPES_TEST_DOCUMENTS);
   }
 
   @After
   public void afterTest() throws Exception {
-    if (factory != null) {
-      factory.shutdown();
+    if (mongod != null) {
+      mongod.stop();
+    }
+    if (mongodExecutable != null) {
+      mongodExecutable.stop();
     }
   }
 
@@ -219,7 +304,6 @@ public class MongoDBTest extends HydratorTestBase {
         .putAll(getCommonPluginProperties())
         .put(MongoDBConstants.COLLECTION, MONGO_SOURCE_COLLECTIONS)
         .put(MongoDBConstants.SCHEMA, SOURCE_BODY_SCHEMA.toString())
-        .put(MongoDBConstants.SPLITTER_CLASS, StandaloneMongoSplitter.class.getSimpleName())
         .put(Constants.Reference.REFERENCE_NAME, "MongoMongoTest").build(),
       null));
 
@@ -245,7 +329,6 @@ public class MongoDBTest extends HydratorTestBase {
     workflowManager.start();
     workflowManager.waitForRuns(ProgramRunStatus.COMPLETED, 1, 5, TimeUnit.MINUTES);
 
-    MongoClient mongoClient = factory.newMongo();
     MongoDatabase mongoDatabase = mongoClient.getDatabase(MONGO_DB);
     MongoCollection<Document> documents = mongoDatabase.getCollection(MONGO_SINK_COLLECTIONS);
     Assert.assertEquals(2, documents.count());
@@ -276,7 +359,6 @@ public class MongoDBTest extends HydratorTestBase {
         .putAll(getCommonPluginProperties())
         .put(MongoDBConstants.COLLECTION, MONGO_SOURCE_COLLECTIONS)
         .put(MongoDBConstants.SCHEMA, SOURCE_BODY_SCHEMA.toString())
-        .put(MongoDBConstants.SPLITTER_CLASS, StandaloneMongoSplitter.class.getSimpleName())
         .put(Constants.Reference.REFERENCE_NAME, "SimpleMongoTest").build(),
       null));
     String outputDatasetName = "output-batchsourcetest";
@@ -310,8 +392,77 @@ public class MongoDBTest extends HydratorTestBase {
     Assert.assertEquals(10.10, (double) row2.get("price"), 0.00001);
   }
 
+  @SuppressWarnings("ConstantConditions")
+  @Test
+  public void testMongoDBSourceSupportedDataTypes() throws Exception {
+    ETLStage source = new ETLStage("MongoDB", new ETLPlugin(
+      "MongoDB",
+      BatchSource.PLUGIN_TYPE,
+      new ImmutableMap.Builder<String, String>()
+        .putAll(getCommonPluginProperties())
+        .put(MongoDBConstants.COLLECTION, MONGO_SUPPORTED_DATA_TYPES_COLLECTIONS)
+        .put(MongoDBConstants.SCHEMA, SUPPORTED_DATA_TYPES_SCHEMA.toString())
+        .put(Constants.Reference.REFERENCE_NAME, "AllDataTypesMongoTest").build(),
+      null));
+    String outputDatasetName = "all-data-types-output-batchsourcetest";
+    ETLStage sink = new ETLStage("sink", MockSink.getPlugin(outputDatasetName));
+    ETLBatchConfig etlConfig = ETLBatchConfig.builder("* * * * *")
+      .addStage(source)
+      .addStage(sink)
+      .addConnection(source.getName(), sink.getName())
+      .build();
+
+    AppRequest<ETLBatchConfig> appRequest = new AppRequest<>(ETLBATCH_ARTIFACT, etlConfig);
+    ApplicationId appId = NamespaceId.DEFAULT.app("MongoAllDataTypesSourceTest");
+    ApplicationManager appManager = deployApplication(appId, appRequest);
+
+    WorkflowManager workflowManager = appManager.getWorkflowManager(SmartWorkflow.NAME);
+    workflowManager.start();
+    workflowManager.waitForRuns(ProgramRunStatus.COMPLETED, 1, 5, TimeUnit.MINUTES);
+
+    DataSetManager<Table> outputManager = getDataset(outputDatasetName);
+    List<StructuredRecord> outputRecords = MockSink.readOutput(outputManager);
+    Assert.assertEquals(2, outputRecords.size());
+    for (BsonDocument expected : SUPPORTED_DATA_TYPES_TEST_DOCUMENTS) {
+      Optional<StructuredRecord> actualOptional = outputRecords.stream()
+        .filter(r -> expected.getObjectId("_id").getValue().toHexString().equals(r.get("_id")))
+        .findAny();
+
+      Assert.assertTrue(String.format("Output must contain record for document with ID: '%s'",
+                                      expected.getObjectId("_id").getValue().toHexString()),
+                        actualOptional.isPresent());
+      StructuredRecord actual = actualOptional.get();
+
+      Assert.assertNull(actual.get("null"));
+      Assert.assertEquals(expected.getString("string").getValue(), actual.get("string"));
+      Assert.assertEquals(expected.getInt32("int32").getValue(), (int) actual.get("int32"));
+      Assert.assertEquals(expected.getDouble("double").getValue(), actual.get("double"), 0.00001);
+      Assert.assertArrayEquals(expected.getBinary("binary").getData(), Bytes.getBytes(actual.get("binary")));
+      Assert.assertEquals(expected.getInt64("long").getValue(), (long) actual.get("long"));
+      Assert.assertEquals(expected.getBoolean("boolean").getValue(), actual.get("boolean"));
+
+      Assert.assertEquals(expected.getArray("array").getValues().stream()
+                            .map(BsonValue::asString)
+                            .map(BsonString::getValue)
+                            .collect(Collectors.toList()), actual.get("array"));
+
+      Assert.assertEquals(expected.getDocument("object").getString("inner_field").getValue(),
+                          actual.<StructuredRecord>get("object").get("inner_field"));
+
+      Map<String, String> expectedMap = expected.getDocument("object-to-map").entrySet().stream()
+        .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().asString().getValue()));
+
+      Assert.assertEquals(expectedMap, actual.get("object-to-map"));
+
+      Assert.assertEquals(expected.getDateTime("date").getValue(),
+                          actual.getTimestamp("date").toInstant().toEpochMilli());
+
+      Assert.assertEquals(expected.getDecimal128("decimal").getValue().bigDecimalValue(),
+                          actual.getDecimal("decimal"));
+    }
+  }
+
   private void verifyMongoSinkData(String collectionName) throws Exception {
-    MongoClient mongoClient = factory.newMongo();
     MongoDatabase mongoDatabase = mongoClient.getDatabase(MONGO_DB);
     MongoCollection<Document> documents = mongoDatabase.getCollection(collectionName);
     Assert.assertEquals(2, documents.count());
@@ -335,6 +486,7 @@ public class MongoDBTest extends HydratorTestBase {
       .put(MongoDBConstants.HOST, "localhost")
       .put(MongoDBConstants.PORT, String.valueOf(mongoPort))
       .put(MongoDBConstants.DATABASE, MONGO_DB)
+      .put(MongoDBConstants.ON_ERROR, ErrorHandling.FAIL_PIPELINE.getDisplayName())
       .build();
   }
 }

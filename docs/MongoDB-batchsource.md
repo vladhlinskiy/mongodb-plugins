@@ -24,23 +24,12 @@ Configuration
 **Input Query:** Optionally filter the input collection with a query. This query must be represented in JSON format
 and use the [MongoDB extended JSON format] to represent non-native JSON data types. (Macro-enabled)
 
-**Input Fields:** [Projection document] that can limit the fields that appear in each document. This must be
-represented in JSON format, and use the [MongoDB extended JSON format] to represent non-native JSON data types. If no
-projection document is provided, all fields will be read. (Macro-enabled)
-
-**Splitter Class:** The name of the Splitter class to use. If left empty, the MongoDB Hadoop Connector will attempt
-to make a best-guess as to which Splitter to use. (Macro-enabled)
-
-The Hadoop connector provides these Splitters:
-
-  - `com.mongodb.hadoop.splitter.StandaloneMongoSplitter`
-  - `com.mongodb.hadoop.splitter.ShardMongoSplitter`
-  - `com.mongodb.hadoop.splitter.ShardChunkMongoSplitter`
-  - `com.mongodb.hadoop.splitter.MultiMongoCollectionSplitter`
-
 **Username:** User identity for connecting to the specified database.
 
 **Password:** Password to use to connect to the specified database.
+
+**On Record Error:** Specifies how to handle error in record processing. An error will be thrown if failed to parse
+value according to a provided schema.
 
 **Authentication Connection String:** Auxiliary MongoDB connection string to authenticate against when constructing
 splits. (Macro-enabled)
@@ -50,9 +39,6 @@ splits. (Macro-enabled)
 
 [MongoDB extended JSON format]:
 http://docs.mongodb.org/manual/reference/mongodb-extended-json/
-
-[Projection document]:
-http://docs.mongodb.org/manual/reference/method/db.collection.find/#projections
 
 [Connection String Options]:
 https://docs.mongodb.com/manual/reference/connection-string/#connections-connection-options

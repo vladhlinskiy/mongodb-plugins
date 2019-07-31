@@ -66,19 +66,10 @@ public class MongoDBConstants extends PluginConfig {
   public static final String INPUT_QUERY = "inputQuery";
 
   /**
-   * Configuration property name used to specify a
-   * <a href="http://docs.mongodb.org/manual/reference/method/db.collection.find/#projections">projection document</a>
-   * that can limit the fields that appear in each document. This must be represented in JSON format, and use the
-   * <a href="http://docs.mongodb.org/manual/reference/mongodb-extended-json/">MongoDB extended JSON format</a>
-   * to represent non-native JSON data types. If no projection document is provided, all fields will be read.
+   * Configuration property name used to specify how to handle error in record processing. An error will be thrown if
+   * failed to parse value according to a provided schema..
    */
-  public static final String INPUT_FIELDS = "inputFields";
-
-  /**
-   * Configuration property name used to specify the name of the Splitter class to use. If left empty, the
-   * MongoDB Hadoop Connector will attempt to make a best-guess as to which Splitter to use.
-   */
-  public static final String SPLITTER_CLASS = "splitterClass";
+  public static final String ON_ERROR = "on-error";
 
   /**
    * Configuration property name used to specify user identity for connecting to the specified database.

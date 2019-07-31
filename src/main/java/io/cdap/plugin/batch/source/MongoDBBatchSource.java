@@ -19,8 +19,6 @@ package io.cdap.plugin.batch.source;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
 import com.mongodb.hadoop.MongoInputFormat;
-import com.mongodb.hadoop.splitter.MongoSplitter;
-import com.mongodb.hadoop.splitter.StandaloneMongoSplitter;
 import com.mongodb.hadoop.util.MongoConfigUtil;
 import io.cdap.cdap.api.annotation.Description;
 import io.cdap.cdap.api.annotation.Macro;
@@ -36,6 +34,7 @@ import io.cdap.cdap.etl.api.batch.BatchRuntimeContext;
 import io.cdap.cdap.etl.api.batch.BatchSource;
 import io.cdap.cdap.etl.api.batch.BatchSourceContext;
 import io.cdap.cdap.etl.api.validation.InvalidConfigPropertyException;
+import io.cdap.plugin.ErrorHandling;
 import io.cdap.plugin.MongoDBConfig;
 import io.cdap.plugin.MongoDBConstants;
 import io.cdap.plugin.common.LineageRecorder;
@@ -44,17 +43,20 @@ import io.cdap.plugin.common.ReferencePluginConfig;
 import io.cdap.plugin.common.SourceInputFormatProvider;
 import org.apache.hadoop.conf.Configuration;
 import org.bson.BSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import javax.annotation.Nullable;
 
 /**
  * A {@link BatchSource} that reads data from MongoDB and converts each document into 
- * a {@link StructuredRecord} with the help of the specified Schema.
+ * a {@link StructuredRecord} using the specified Schema.
  */
 @Plugin(type = BatchSource.PLUGIN_TYPE)
 @Name(MongoDBConstants.PLUGIN_NAME)
@@ -62,6 +64,7 @@ import javax.annotation.Nullable;
   "into a StructuredRecord with the help of the specified Schema. ")
 public class MongoDBBatchSource extends ReferenceBatchSource<Object, BSONObject, StructuredRecord> {
 
+  private static final Logger LOG = LoggerFactory.getLogger(MongoDBBatchSource.class);
   private final MongoDBSourceConfig config;
   private BSONObjectToRecordTransformer bsonObjectToRecordTransformer;
 
@@ -92,16 +95,6 @@ public class MongoDBBatchSource extends ReferenceBatchSource<Object, BSONObject,
     if (!Strings.isNullOrEmpty(config.authConnectionString)) {
       MongoConfigUtil.setAuthURI(conf, config.authConnectionString);
     }
-    if (!Strings.isNullOrEmpty(config.inputFields)) {
-      MongoConfigUtil.setFields(conf, config.inputFields);
-    }
-    if (!Strings.isNullOrEmpty(config.splitterClass)) {
-      String className = String.format("%s.%s", StandaloneMongoSplitter.class.getPackage().getName(),
-                                       config.splitterClass);
-      Class<? extends MongoSplitter> klass = getClass().getClassLoader().loadClass(
-        className).asSubclass(MongoSplitter.class);
-      MongoConfigUtil.setSplitterClass(conf, klass);
-    }
 
     emitLineage(context);
     context.setInput(Input.of(config.referenceName,
@@ -116,8 +109,22 @@ public class MongoDBBatchSource extends ReferenceBatchSource<Object, BSONObject,
 
   @Override
   public void transform(KeyValue<Object, BSONObject> input, Emitter<StructuredRecord> emitter) throws Exception {
+    try {
     BSONObject bsonObject = input.getValue();
     emitter.emit(bsonObjectToRecordTransformer.transform(bsonObject));
+    } catch (Exception e) {
+      switch (config.getErrorHandling()) {
+        case SKIP:
+          LOG.warn("Failed to process record, skipping it", e);
+          break;
+        case FAIL_PIPELINE:
+          throw new RuntimeException("Failed to process record", e);
+        default:
+          // this should never happen because it is validated at configure and prepare time
+          throw new IllegalStateException(String.format("Unknown error handling strategy '%s'",
+                                                        config.getErrorHandling()));
+      }
+    }
   }
 
   private void emitLineage(BatchSourceContext context) {
@@ -136,10 +143,15 @@ public class MongoDBBatchSource extends ReferenceBatchSource<Object, BSONObject,
    */
   public static class MongoDBSourceConfig extends MongoDBConfig {
 
-    public static final Set<Schema.Type> SUPPORTED_FIELD_TYPES = ImmutableSet.of(Schema.Type.ARRAY, Schema.Type.BOOLEAN,
-                                                                                 Schema.Type.BYTES, Schema.Type.STRING,
-                                                                                 Schema.Type.DOUBLE, Schema.Type.FLOAT,
-                                                                                 Schema.Type.INT, Schema.Type.LONG);
+    public static final Set<Schema.Type> SUPPORTED_SIMPLE_TYPES = ImmutableSet.of(Schema.Type.BOOLEAN, Schema.Type.INT,
+                                                                                  Schema.Type.DOUBLE, Schema.Type.BYTES,
+                                                                                  Schema.Type.LONG, Schema.Type.STRING,
+                                                                                  Schema.Type.ARRAY, Schema.Type.RECORD,
+                                                                                  Schema.Type.MAP);
+
+    public static final Set<Schema.LogicalType> SUPPORTED_LOGICAL_TYPES = ImmutableSet.of(
+      Schema.LogicalType.DECIMAL, Schema.LogicalType.TIMESTAMP_MILLIS);
+
     @Name(MongoDBConstants.SCHEMA)
     @Description("Schema of records output by the source.")
     public String schema;
@@ -151,19 +163,11 @@ public class MongoDBBatchSource extends ReferenceBatchSource<Object, BSONObject,
     @Macro
     public String inputQuery;
 
-    @Name(MongoDBConstants.INPUT_FIELDS)
-    @Nullable
-    @Description("A projection document limiting the fields that appear in each document. " +
-      "If no projection document is provided, all fields will be read.")
+    @Name(MongoDBConstants.ON_ERROR)
+    @Description("Specifies how to handle error in record processing. Error will be thrown if failed to parse value " +
+      "according to provided schema.")
     @Macro
-    public String inputFields;
-
-    @Name(MongoDBConstants.SPLITTER_CLASS)
-    @Nullable
-    @Description("The name of the Splitter class to use. If left empty, the MongoDB Hadoop Connector will attempt " +
-      "to make a best guess as to what Splitter to use.")
-    @Macro
-    public String splitterClass;
+    public String onError;
 
     @Name(MongoDBConstants.AUTH_CONNECTION_STRING)
     @Nullable
@@ -171,9 +175,6 @@ public class MongoDBBatchSource extends ReferenceBatchSource<Object, BSONObject,
     @Macro
     public String authConnectionString;
 
-    /**
-     * @return the schema of the dataset
-     */
     @Nullable
     public Schema getSchema() {
       try {
@@ -183,9 +184,22 @@ public class MongoDBBatchSource extends ReferenceBatchSource<Object, BSONObject,
       }
     }
 
+    public ErrorHandling getErrorHandling() {
+      return Objects.requireNonNull(ErrorHandling.fromDisplayName(onError));
+    }
+
     @Override
     public void validate() {
       super.validate();
+      if (!containsMacro(MongoDBConstants.ON_ERROR) && null != onError) {
+        if (Strings.isNullOrEmpty(onError)) {
+          throw new InvalidConfigPropertyException("Error handling must be specified", MongoDBConstants.ON_ERROR);
+        }
+        if (null == ErrorHandling.fromDisplayName(onError)) {
+          throw new InvalidConfigPropertyException("Invalid record error handling strategy name",
+                                                   MongoDBConstants.ON_ERROR);
+        }
+      }
       if (!containsMacro(MongoDBConstants.SCHEMA)) {
         Schema parsedSchema = getSchema();
         if (parsedSchema == null) {
@@ -196,16 +210,23 @@ public class MongoDBBatchSource extends ReferenceBatchSource<Object, BSONObject,
           throw new InvalidConfigPropertyException("Schema should contain fields to map", MongoDBConstants.SCHEMA);
         }
         for (Schema.Field field : fields) {
-          Schema.Type fieldType = field.getSchema().isNullable()
-            ? field.getSchema().getNonNullable().getType()
-            : field.getSchema().getType();
-          if (!SUPPORTED_FIELD_TYPES.contains(fieldType)) {
-            String supportedTypes = SUPPORTED_FIELD_TYPES.stream()
+
+          Schema nonNullableSchema = field.getSchema().isNullable() ? field.getSchema().getNonNullable()
+            : field.getSchema();
+
+          if (!SUPPORTED_SIMPLE_TYPES.contains(nonNullableSchema.getType()) &&
+            !SUPPORTED_LOGICAL_TYPES.contains(nonNullableSchema.getLogicalType())) {
+            String supportedTypes = Stream.concat(SUPPORTED_SIMPLE_TYPES.stream(), SUPPORTED_LOGICAL_TYPES.stream())
               .map(Enum::name)
               .map(String::toLowerCase)
               .collect(Collectors.joining(", "));
+
+            String actualTypeName = nonNullableSchema.getLogicalType() != null
+              ? nonNullableSchema.getLogicalType().name().toLowerCase()
+              : nonNullableSchema.getType().name().toLowerCase();
+
             String errorMessage = String.format("Field '%s' is of unsupported type '%s'. Supported types are: %s. ",
-                                                field.getName(), fieldType, supportedTypes);
+                                                field.getName(), actualTypeName, supportedTypes);
             throw new InvalidConfigPropertyException(errorMessage, MongoDBConstants.SCHEMA);
           }
         }

@@ -94,16 +94,6 @@ public class MongoDBSourceConfigBuilder {
     return this;
   }
 
-  public MongoDBSourceConfigBuilder setInputFields(String inputFields) {
-    this.config.inputFields = inputFields;
-    return this;
-  }
-
-  public MongoDBSourceConfigBuilder setSplitterClass(String splitterClass) {
-    this.config.splitterClass = splitterClass;
-    return this;
-  }
-
   public MongoDBSourceConfigBuilder setAuthConnectionString(String authConnectionString) {
     this.config.authConnectionString = authConnectionString;
     return this;
