@@ -18,6 +18,7 @@ package io.cdap.plugin.batch.source;
 
 import io.cdap.cdap.api.data.schema.Schema;
 import io.cdap.cdap.etl.api.validation.InvalidConfigPropertyException;
+import io.cdap.plugin.ErrorHandling;
 import io.cdap.plugin.MongoDBConstants;
 import io.cdap.plugin.common.Constants;
 import org.junit.Assert;
@@ -50,6 +51,7 @@ public class MongoDBSourceConfigTest {
     .setPassword("password")
     .setConnectionArguments("key=value;")
     .setSchema(VALID_SCHEMA.toString())
+    .setOnError(ErrorHandling.FAIL_PIPELINE)
     .build();
 
   @Test

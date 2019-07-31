@@ -15,6 +15,7 @@
  */
 package io.cdap.plugin.batch.source;
 
+import io.cdap.plugin.ErrorHandling;
 import io.cdap.plugin.MongoDBConfig;
 
 /**
@@ -40,7 +41,15 @@ public class MongoDBSourceConfigBuilder {
       .setConnectionArguments(original.connectionArguments);
   }
 
-  public MongoDBSourceConfigBuilder(MongoDBBatchSource.MongoDBSourceConfig config) {
+  public static MongoDBSourceConfigBuilder builder(MongoDBBatchSource.MongoDBSourceConfig original) {
+    return builder((MongoDBConfig) original)
+      .setSchema(original.schema)
+      .setInputQuery(original.inputQuery)
+      .setAuthConnectionString(original.authConnectionString)
+      .setOnError(ErrorHandling.fromDisplayName(original.onError));
+  }
+
+  private MongoDBSourceConfigBuilder(MongoDBBatchSource.MongoDBSourceConfig config) {
     this.config = config;
   }
 
@@ -86,6 +95,11 @@ public class MongoDBSourceConfigBuilder {
 
   public MongoDBSourceConfigBuilder setSchema(String schema) {
     this.config.schema = schema;
+    return this;
+  }
+
+  public MongoDBSourceConfigBuilder setOnError(ErrorHandling onError) {
+    this.config.onError = onError.getDisplayName();
     return this;
   }
 

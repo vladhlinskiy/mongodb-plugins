@@ -89,6 +89,7 @@ public class MongoDBBatchSource extends ReferenceBatchSource<Object, BSONObject,
 
     MongoConfigUtil.setInputFormat(conf, MongoInputFormat.class);
     MongoConfigUtil.setInputURI(conf, config.getConnectionString());
+    MongoConfigUtil.setFields(conf, config.getProjectionDocument());
     if (!Strings.isNullOrEmpty(config.inputQuery)) {
       MongoConfigUtil.setQuery(conf, config.inputQuery);
     }
@@ -175,13 +176,29 @@ public class MongoDBBatchSource extends ReferenceBatchSource<Object, BSONObject,
     @Macro
     public String authConnectionString;
 
-    @Nullable
     public Schema getSchema() {
       try {
-        return null == schema ? null : Schema.parseJson(schema);
+        return Schema.parseJson(schema);
       } catch (IOException e) {
         throw new InvalidConfigPropertyException("Invalid schema", e, MongoDBConstants.SCHEMA);
       }
+    }
+
+    /**
+     * Constructs JSON projection document based on the output schema.
+     * @return
+     */
+    public String getProjectionDocument() {
+      StringBuilder builder = new StringBuilder("{");
+      List<Schema.Field> fields = Objects.requireNonNull(getSchema().getFields());
+      for (int i = 0; i < fields.size(); i++) {
+        builder.append("\"").append(fields.get(i).getName()).append("\": 1");
+        if (i < fields.size() - 1) {
+          builder.append(", ");
+        }
+      }
+
+      return builder.append("}").toString();
     }
 
     public ErrorHandling getErrorHandling() {
@@ -191,20 +208,20 @@ public class MongoDBBatchSource extends ReferenceBatchSource<Object, BSONObject,
     @Override
     public void validate() {
       super.validate();
-      if (!containsMacro(MongoDBConstants.ON_ERROR) && null != onError) {
+      if (!containsMacro(MongoDBConstants.ON_ERROR)) {
         if (Strings.isNullOrEmpty(onError)) {
           throw new InvalidConfigPropertyException("Error handling must be specified", MongoDBConstants.ON_ERROR);
         }
-        if (null == ErrorHandling.fromDisplayName(onError)) {
+        if (ErrorHandling.fromDisplayName(onError) == null) {
           throw new InvalidConfigPropertyException("Invalid record error handling strategy name",
                                                    MongoDBConstants.ON_ERROR);
         }
       }
       if (!containsMacro(MongoDBConstants.SCHEMA)) {
-        Schema parsedSchema = getSchema();
-        if (parsedSchema == null) {
+        if (schema == null) {
           throw new InvalidConfigPropertyException("Schema must be specified", MongoDBConstants.SCHEMA);
         }
+        Schema parsedSchema = getSchema();
         List<Schema.Field> fields = parsedSchema.getFields();
         if (fields == null || fields.isEmpty()) {
           throw new InvalidConfigPropertyException("Schema should contain fields to map", MongoDBConstants.SCHEMA);
