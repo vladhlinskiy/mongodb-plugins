@@ -19,12 +19,17 @@ package io.cdap.plugin.batch.sink;
 import com.google.common.collect.ImmutableMap;
 import com.mongodb.hadoop.io.BSONWritable;
 import io.cdap.cdap.api.data.format.StructuredRecord;
+import io.cdap.cdap.api.data.format.UnexpectedFormatException;
 import io.cdap.cdap.api.data.schema.Schema;
 import org.bson.BSONObject;
+import org.bson.types.ObjectId;
 import org.junit.Assert;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.ExpectedException;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -34,6 +39,9 @@ import java.util.Map;
  * {@link RecordToBSONWritableTransformer} test.
  */
 public class RecordToBSONWritableTransformerTest {
+
+  @Rule
+  public ExpectedException thrown = ExpectedException.none();
 
   private static final RecordToBSONWritableTransformer TRANSFORMER = new RecordToBSONWritableTransformer();
 
@@ -147,7 +155,7 @@ public class RecordToBSONWritableTransformerTest {
 
     StructuredRecord nestedRecord3 = StructuredRecord.builder(nestedRecordSchema)
       .set("nested_string_field", "some value")
-      .setDecimal("nested_decimal_field",  new BigDecimal("10.01"))
+      .setDecimal("nested_decimal_field", new BigDecimal("10.01"))
       .build();
 
     Map<String, Map<String, StructuredRecord>> map = ImmutableMap.<String, Map<String, StructuredRecord>>builder()
@@ -255,7 +263,7 @@ public class RecordToBSONWritableTransformerTest {
       Collections.singletonList(
         StructuredRecord.builder(nestedRecordSchema)
           .set("nested_string_field", "some value")
-          .setDecimal("nested_decimal_field",  new BigDecimal("10.01"))
+          .setDecimal("nested_decimal_field", new BigDecimal("10.01"))
           .build()
       )
     );
@@ -280,5 +288,75 @@ public class RecordToBSONWritableTransformerTest {
 
     Assert.assertEquals(TRANSFORMER.transform(arrayOfRecords.get(2).get(0)).getDoc(),
                         ((List) actualArrayOfRecords.get(2)).get(0));
+  }
+
+  @Test
+  public void testTransformStringIdField() {
+    Schema nestedRecordSchema = Schema.recordOf("nested",
+                                                Schema.Field.of("string_field", Schema.of(Schema.Type.STRING)));
+    Schema schema = Schema.recordOf("schema",
+                                    Schema.Field.of("string_field", Schema.of(Schema.Type.STRING)),
+                                    Schema.Field.of("nested_record", nestedRecordSchema));
+
+    StructuredRecord inputRecord = StructuredRecord.builder(schema)
+      .set("string_field", "5d431557d62a513457e791f4")
+      .set("nested_record", StructuredRecord.builder(nestedRecordSchema)
+        .set("string_field", "5d431557d62a513457e791f4")
+        .build())
+      .build();
+
+    BSONWritable bsonWritable = new RecordToBSONWritableTransformer("string_field").transform(inputRecord);
+    BSONObject bsonObject = bsonWritable.getDoc();
+
+    Assert.assertEquals(new ObjectId("5d431557d62a513457e791f4"), bsonObject.get("_id"));
+    Assert.assertFalse(bsonObject.containsField("string_field"));
+
+    BSONObject nestedActual = (BSONObject) bsonObject.get("nested_record");
+    // Nested records must not be affected
+    Assert.assertFalse(nestedActual.containsField("_id"));
+  }
+
+  @Test
+  public void testTransformBytesIdField() {
+    Schema nestedRecordSchema = Schema.recordOf("nested",
+                                                Schema.Field.of("bytes_field", Schema.of(Schema.Type.STRING)));
+    Schema schema = Schema.recordOf("schema",
+                                    Schema.Field.of("bytes_field", Schema.of(Schema.Type.BYTES)),
+                                    Schema.Field.of("nested_record", nestedRecordSchema));
+
+    ByteBuffer byteBuffer = ByteBuffer.allocate(12);
+    new ObjectId("5d431557d62a513457e791f4").putToByteBuffer(byteBuffer);
+
+    StructuredRecord inputRecord = StructuredRecord.builder(schema)
+      .set("bytes_field", byteBuffer.array())
+      .set("nested_record", StructuredRecord.builder(nestedRecordSchema)
+        .set("bytes_field", "5d431557d62a513457e791f4")
+        .build())
+      .build();
+
+    BSONWritable bsonWritable = new RecordToBSONWritableTransformer("bytes_field").transform(inputRecord);
+    BSONObject bsonObject = bsonWritable.getDoc();
+
+    Assert.assertEquals(new ObjectId("5d431557d62a513457e791f4"), bsonObject.get("_id"));
+    Assert.assertFalse(bsonObject.containsField("bytes_field"));
+
+    BSONObject nestedActual = (BSONObject) bsonObject.get("nested_record");
+    // Nested records must not be affected
+    Assert.assertFalse(nestedActual.containsField("_id"));
+  }
+
+  @Test
+  public void testTransformWithExistingIdFields() {
+    Schema schema = Schema.recordOf("schema",
+                                    Schema.Field.of("_id", Schema.of(Schema.Type.STRING)),
+                                    Schema.Field.of("string_field", Schema.of(Schema.Type.STRING)));
+
+    StructuredRecord inputRecord = StructuredRecord.builder(schema)
+      .set("_id", "5d4314a21709b57dbc773580")
+      .set("string_field", "5d431557d62a513457e791f4")
+      .build();
+
+    thrown.expect(UnexpectedFormatException.class);
+    new RecordToBSONWritableTransformer("string_field").transform(inputRecord);
   }
 }

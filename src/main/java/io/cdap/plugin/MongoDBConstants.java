@@ -91,4 +91,9 @@ public class MongoDBConstants extends PluginConfig {
    * Configuration property name used to specify a list of arbitrary string key/value pairs as connection arguments.
    */
   public static final String CONNECTION_ARGUMENTS = "connectionArguments";
+
+  /**
+   * Configuration property name used to specify which of the incoming fields should be used as an object identifier.
+   */
+  public static final String ID_FIELD = "idField";
 }

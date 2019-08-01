@@ -18,6 +18,9 @@ Configuration
 
 **Collection:** Name of the database collection to write to.
 
+**ID Field:** Allows to specify which of the incoming fields should be used as an document identifier. Identifier will
+be generated if no value is specified.
+
 **Username:** User identity for connecting to the specified database.
 
 **Password:** Password to use to connect to the specified database.

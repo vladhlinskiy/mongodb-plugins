@@ -49,6 +49,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import javax.annotation.Nullable;
 
 /**
  * A {@link BatchSink} that writes data to MongoDB.
@@ -60,7 +61,7 @@ import java.util.stream.Stream;
 @Description("MongoDB Batch Sink converts a StructuredRecord to a BSONWritable and writes it to MongoDB.")
 public class MongoDBBatchSink extends ReferenceBatchSink<StructuredRecord, NullWritable, BSONWritable> {
 
-  private final MongoDBConfig config;
+  private final MongoDBSinkConfig config;
   private RecordToBSONWritableTransformer transformer;
   private static final Set<Schema.Type> SUPPORTED_SIMPLE_TYPES = ImmutableSet.of(Schema.Type.ARRAY, Schema.Type.BOOLEAN,
                                                                                  Schema.Type.BYTES, Schema.Type.STRING,
@@ -73,7 +74,7 @@ public class MongoDBBatchSink extends ReferenceBatchSink<StructuredRecord, NullW
     Schema.LogicalType.DATE, Schema.LogicalType.DECIMAL, Schema.LogicalType.TIME_MILLIS, Schema.LogicalType.TIME_MICROS,
     Schema.LogicalType.TIMESTAMP_MILLIS, Schema.LogicalType.TIMESTAMP_MICROS);
 
-  public MongoDBBatchSink(MongoDBConfig config) {
+  public MongoDBBatchSink(MongoDBSinkConfig config) {
     super(new ReferencePluginConfig(config.referenceName));
     this.config = config;
   }
@@ -105,7 +106,7 @@ public class MongoDBBatchSink extends ReferenceBatchSink<StructuredRecord, NullW
   @Override
   public void initialize(BatchRuntimeContext context) throws Exception {
     super.initialize(context);
-    transformer = new RecordToBSONWritableTransformer();
+    transformer = new RecordToBSONWritableTransformer(config.idField);
   }
 
   @Override
@@ -171,5 +172,17 @@ public class MongoDBBatchSink extends ReferenceBatchSink<StructuredRecord, NullW
     public Map<String, String> getOutputFormatConfiguration() {
       return conf;
     }
+  }
+
+  /**
+   * Config class for {@link MongoDBBatchSink}.
+   */
+  public static class MongoDBSinkConfig extends MongoDBConfig {
+
+    @Name(MongoDBConstants.ID_FIELD)
+    @Nullable
+    @Description("Allows to specify which of the incoming fields should be used as an document identifier. " +
+      "Identifier will be generated if no value is specified.")
+    public String idField;
   }
 }

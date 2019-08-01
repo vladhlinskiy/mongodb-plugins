@@ -16,6 +16,7 @@
 
 package io.cdap.plugin.batch.sink;
 
+import com.google.common.base.Strings;
 import com.mongodb.BasicDBObjectBuilder;
 import com.mongodb.DBObject;
 import com.mongodb.hadoop.io.BSONWritable;
@@ -24,6 +25,7 @@ import io.cdap.cdap.api.data.format.StructuredRecord;
 import io.cdap.cdap.api.data.format.UnexpectedFormatException;
 import io.cdap.cdap.api.data.schema.Schema;
 import org.bson.types.Decimal128;
+import org.bson.types.ObjectId;
 
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
@@ -37,24 +39,85 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 
 /**
  * Transforms {@link StructuredRecord} to {@link BSONWritable}.
  */
 public class RecordToBSONWritableTransformer {
 
+  private static final String DEFAULT_ID_FIELD_NAME = "_id";
+
+  private String idField;
+
+  public RecordToBSONWritableTransformer() {
+  }
+
+  /**
+   * @param idField specifies which of the incoming fields should be used as an document identifier. Identifier will
+   *                be generated if no value is specified.
+   */
+  public RecordToBSONWritableTransformer(@Nullable String idField) {
+    this.idField = idField;
+  }
+
   /**
    * Transforms given {@link StructuredRecord} to {@link BSONWritable}.
    *
-   * @param record structured record to be transformed.
+   * @param original structured record to be transformed.
    * @return {@link BSONWritable} that corresponds to the given {@link StructuredRecord}.
    */
-  public BSONWritable transform(StructuredRecord record) {
-    return new BSONWritable(extractRecord(record));
+  public BSONWritable transform(StructuredRecord original) {
+    StructuredRecord record = Strings.isNullOrEmpty(idField) || DEFAULT_ID_FIELD_NAME.equals(idField) ? original :
+      createRecordWithId(original);
+    return new BSONWritable(extractRecord(record, DEFAULT_ID_FIELD_NAME));
   }
 
-  private DBObject extractRecord(Object value) {
+  private StructuredRecord createRecordWithId(StructuredRecord original) {
+    Optional<Schema.Field> idFieldOptional = Objects.requireNonNull(original.getSchema().getFields()).stream()
+      .filter(field -> idField.equals(field.getName()))
+      .findAny();
+
+    if (!idFieldOptional.isPresent()) {
+      throw new UnexpectedFormatException(String.format("Record does not contain identifier field '%s'.", idField));
+    }
+
+    Optional<Schema.Field> defaultIdFieldOptional = Objects.requireNonNull(original.getSchema().getFields()).stream()
+      .filter(field -> DEFAULT_ID_FIELD_NAME.equals(field.getName()))
+      .findAny();
+
+    if (idFieldOptional.isPresent() && defaultIdFieldOptional.isPresent()) {
+      throw new UnexpectedFormatException(String.format("Record already contains identifier field '%s'.",
+                                                        DEFAULT_ID_FIELD_NAME));
+    }
+
+    List<Schema.Field> copiedFields = Objects.requireNonNull(original.getSchema().getFields()).stream()
+      .filter(field -> !idField.equals(field.getName()))
+      .collect(Collectors.toList());
+
+    List<Schema.Field> recordWithIdFields = new ArrayList<>();
+    recordWithIdFields.add(Schema.Field.of(DEFAULT_ID_FIELD_NAME, idFieldOptional.get().getSchema()));
+    recordWithIdFields.addAll(copiedFields);
+
+    String recordName = Objects.requireNonNull(original.getSchema().getRecordName(), "Record name can not be empty");
+    Schema recordWithIdSchema = Schema.recordOf(recordName, recordWithIdFields);
+    StructuredRecord.Builder builder = StructuredRecord.builder(recordWithIdSchema);
+    for (Schema.Field field : original.getSchema().getFields()) {
+      if (idField.equals(field.getName())) {
+        builder.set(DEFAULT_ID_FIELD_NAME, original.get(idField));
+        continue;
+      }
+
+      builder.set(field.getName(), original.get(field.getName()));
+    }
+
+    return builder.build();
+  }
+
+
+  private DBObject extractRecord(Object value, @Nullable String idFieldName) {
     if (value == null) {
       // Return 'null' value as it is
       return null;
@@ -66,6 +129,11 @@ public class RecordToBSONWritableTransformer {
       Schema.LogicalType fieldLogicalType = field.getSchema().isNullable()
         ? field.getSchema().getNonNullable().getLogicalType()
         : field.getSchema().getLogicalType();
+
+      if (!Strings.isNullOrEmpty(idFieldName) && idFieldName.equals(field.getName())) {
+        bsonBuilder.add(idFieldName, extractObjectId(record.get(field.getName())));
+        continue;
+      }
 
       if (fieldLogicalType == null) {
         bsonBuilder.add(field.getName(), extractValue(record.get(field.getName()), field.getSchema()));
@@ -98,6 +166,19 @@ public class RecordToBSONWritableTransformer {
       }
     }
     return bsonBuilder.get();
+  }
+
+  private ObjectId extractObjectId(Object value) {
+    if (value instanceof byte[]) {
+      return new ObjectId((byte[]) value);
+    } else if (value instanceof ByteBuffer) {
+      byte[] idBytes = Bytes.getBytes((ByteBuffer) value);
+      return new ObjectId(idBytes);
+    } else if (value instanceof String) {
+      return new ObjectId((String) value);
+    }
+
+    throw new UnexpectedFormatException("Invalid ID field value: " + value);
   }
 
   private Object extractValue(Object value, Schema fieldSchema) {
@@ -134,14 +215,14 @@ public class RecordToBSONWritableTransformer {
       case ARRAY:
         return extractArray(value, nonNullableSchema);
       case RECORD:
-        return extractRecord(value);
+        return extractRecord(value, null);
       case UNION:
         return extractUnion(value, nonNullableSchema);
       case ENUM:
         String enumValue = (String) value;
         if (!Objects.requireNonNull(nonNullableSchema.getEnumValues()).contains(enumValue)) {
-          throw new IllegalArgumentException(String.format("Value '%s' is not enum value. Enum values are: '%s'",
-                                                           enumValue, nonNullableSchema.getEnumValues()));
+          throw new UnexpectedFormatException(String.format("Value '%s' is not enum value. Enum values are: '%s'",
+                                                            enumValue, nonNullableSchema.getEnumValues()));
         }
 
         return enumValue;
@@ -160,7 +241,7 @@ public class RecordToBSONWritableTransformer {
       throw new UnexpectedFormatException("Key of the 'map' schema must be of the 'string' type.");
     }
     if (!(value instanceof Map)) {
-      throw new UnexpectedFormatException("Value of 'map' type must be instance of 'java.util.Map'.");
+      throw new UnexpectedFormatException(String.format("Unexpected value of 'map' type: '%s'", value));
     }
 
     Map<String, ?> map = (Map<String, ?>) value;
@@ -176,7 +257,7 @@ public class RecordToBSONWritableTransformer {
       return null;
     }
     if (!(value instanceof List)) {
-      throw new UnexpectedFormatException("Value of 'array' type must be instance of 'java.util.List'.");
+      throw new UnexpectedFormatException(String.format("Unexpected value of 'array' type '%s'", value));
     }
     List values = (List) value;
     List<Object> extracted = new ArrayList<>();
@@ -213,7 +294,7 @@ public class RecordToBSONWritableTransformer {
       int schemaIndex = unionTypes.indexOf(Schema.Type.MAP);
       extractMap(value, schema.getUnionSchema(schemaIndex));
     } else if (unionTypes.indexOf(Schema.Type.RECORD) != -1 || value instanceof StructuredRecord) {
-      extractRecord(value);
+      extractRecord(value, null);
     }
 
     return value;
