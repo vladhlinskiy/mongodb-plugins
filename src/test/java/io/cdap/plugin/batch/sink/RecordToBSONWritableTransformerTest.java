@@ -16,6 +16,7 @@
 
 package io.cdap.plugin.batch.sink;
 
+import com.google.common.collect.ImmutableMap;
 import com.mongodb.hadoop.io.BSONWritable;
 import io.cdap.cdap.api.data.format.StructuredRecord;
 import io.cdap.cdap.api.data.schema.Schema;
@@ -23,7 +24,11 @@ import org.bson.BSONObject;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 /**
  * {@link RecordToBSONWritableTransformer} test.
@@ -35,7 +40,7 @@ public class RecordToBSONWritableTransformerTest {
   @Test
   public void testTransform() {
     Schema schema = Schema.recordOf("schema",
-                                    Schema.Field.of("int_field", Schema.nullableOf(Schema.of(Schema.Type.STRING))),
+                                    Schema.Field.of("int_field", Schema.nullableOf(Schema.of(Schema.Type.INT))),
                                     Schema.Field.of("long_field", Schema.nullableOf(Schema.of(Schema.Type.LONG))),
                                     Schema.Field.of("double_field", Schema.nullableOf(Schema.of(Schema.Type.DOUBLE))),
                                     Schema.Field.of("float_field", Schema.nullableOf(Schema.of(Schema.Type.FLOAT))),
@@ -70,5 +75,210 @@ public class RecordToBSONWritableTransformerTest {
     Assert.assertEquals(inputRecord.get("bytes_field"), bsonObject.get("bytes_field"));
     Assert.assertNull(bsonObject.get("null_field"));
     Assert.assertEquals(inputRecord.get("array_field"), bsonObject.get("array_field"));
+  }
+
+  @Test
+  public void testTransformNestedMapsSimpleTypes() {
+    Schema schema = Schema.recordOf("schema",
+                                    Schema.Field.of("nested_string_maps", Schema.mapOf(
+                                      Schema.of(Schema.Type.STRING), Schema.mapOf(Schema.of(Schema.Type.STRING),
+                                                                                  Schema.of(Schema.Type.STRING)))),
+                                    Schema.Field.of("nested_int_maps", Schema.mapOf(
+                                      Schema.of(Schema.Type.STRING), Schema.mapOf(Schema.of(Schema.Type.STRING),
+                                                                                  Schema.of(Schema.Type.INT)))),
+                                    Schema.Field.of("nested_bytes_maps", Schema.mapOf(
+                                      Schema.of(Schema.Type.STRING), Schema.mapOf(Schema.of(Schema.Type.STRING),
+                                                                                  Schema.of(Schema.Type.BYTES))))
+    );
+
+    Map<String, Map<String, String>> stringMap = ImmutableMap.<String, Map<String, String>>builder()
+      .put("nested_map1", ImmutableMap.<String, String>builder().put("k1", "v1").build())
+      .put("nested_map2", ImmutableMap.<String, String>builder().put("k2", "v2").build())
+      .put("nested_map3", ImmutableMap.<String, String>builder().put("k3", "v3").build())
+      .build();
+
+    Map<String, Map<String, Integer>> intMap = ImmutableMap.<String, Map<String, Integer>>builder()
+      .put("nested_map1", ImmutableMap.<String, Integer>builder().put("k1", 1).build())
+      .put("nested_map2", ImmutableMap.<String, Integer>builder().put("k2", 2).build())
+      .put("nested_map3", ImmutableMap.<String, Integer>builder().put("k3", 3).build())
+      .build();
+
+    Map<String, Map<String, byte[]>> bytesMap = ImmutableMap.<String, Map<String, byte[]>>builder()
+      .put("nested_map1", ImmutableMap.<String, byte[]>builder().put("k1", "v1".getBytes()).build())
+      .put("nested_map2", ImmutableMap.<String, byte[]>builder().put("k2", "v2".getBytes()).build())
+      .put("nested_map3", ImmutableMap.<String, byte[]>builder().put("k3", "v3".getBytes()).build())
+      .build();
+
+    StructuredRecord inputRecord = StructuredRecord.builder(schema)
+      .set("nested_string_maps", stringMap)
+      .set("nested_int_maps", intMap)
+      .set("nested_bytes_maps", bytesMap)
+      .build();
+
+    BSONWritable bsonWritable = TRANSFORMER.transform(inputRecord);
+    BSONObject bsonObject = bsonWritable.getDoc();
+
+    Assert.assertEquals(inputRecord.get("nested_string_maps"), bsonObject.get("nested_string_maps"));
+    Assert.assertEquals(inputRecord.get("nested_int_maps"), bsonObject.get("nested_int_maps"));
+    Assert.assertEquals(inputRecord.get("nested_bytes_maps"), bsonObject.get("nested_bytes_maps"));
+  }
+
+  @Test
+  public void testTransformComplexNestedMaps() {
+
+    Schema nestedRecordSchema = Schema.recordOf("nested_object",
+                                                Schema.Field.of("nested_string_field", Schema.of(Schema.Type.STRING)),
+                                                Schema.Field.of("nested_decimal_field", Schema.decimalOf(4, 2)));
+
+    Schema schema = Schema.recordOf("schema",
+                                    Schema.Field.of("map_field", Schema.nullableOf(
+                                      Schema.mapOf(Schema.of(Schema.Type.STRING),
+                                                   Schema.mapOf(Schema.of(Schema.Type.STRING), nestedRecordSchema)))));
+
+    StructuredRecord nestedRecord1 = StructuredRecord.builder(nestedRecordSchema)
+      .set("nested_string_field", "some value")
+      .setDecimal("nested_decimal_field", new BigDecimal("12.34"))
+      .build();
+
+    StructuredRecord nestedRecord2 = StructuredRecord.builder(nestedRecordSchema)
+      .set("nested_string_field", "some value")
+      .setDecimal("nested_decimal_field", new BigDecimal("10.00"))
+      .build();
+
+    StructuredRecord nestedRecord3 = StructuredRecord.builder(nestedRecordSchema)
+      .set("nested_string_field", "some value")
+      .setDecimal("nested_decimal_field",  new BigDecimal("10.01"))
+      .build();
+
+    Map<String, Map<String, StructuredRecord>> map = ImmutableMap.<String, Map<String, StructuredRecord>>builder()
+      .put("nested_map1", ImmutableMap.<String, StructuredRecord>builder().put("k1", nestedRecord1).build())
+      .put("nested_map2", ImmutableMap.<String, StructuredRecord>builder().put("k2", nestedRecord2).build())
+      .put("nested_map3", ImmutableMap.<String, StructuredRecord>builder().put("k3", nestedRecord3).build())
+      .build();
+
+    StructuredRecord inputRecord = StructuredRecord.builder(schema)
+      .set("map_field", map)
+      .build();
+
+    BSONWritable bsonWritable = TRANSFORMER.transform(inputRecord);
+    BSONObject bsonObject = bsonWritable.getDoc();
+
+    // Nested records must be transformed to a BSONObject as a regular ones
+    BSONObject actualNestedMap1 = (BSONObject) ((BSONObject) bsonObject.get("map_field")).get("nested_map1");
+    Assert.assertEquals(TRANSFORMER.transform(nestedRecord1).getDoc(), actualNestedMap1.get("k1"));
+
+    BSONObject actualNestedMap2 = (BSONObject) ((BSONObject) bsonObject.get("map_field")).get("nested_map2");
+    Assert.assertEquals(TRANSFORMER.transform(nestedRecord2).getDoc(), actualNestedMap2.get("k2"));
+
+    BSONObject actualNestedMap3 = (BSONObject) ((BSONObject) bsonObject.get("map_field")).get("nested_map3");
+    Assert.assertEquals(TRANSFORMER.transform(nestedRecord3).getDoc(), actualNestedMap3.get("k3"));
+  }
+
+  @Test
+  public void testTransformNestedArraysSimpleTypes() {
+    Schema schema = Schema.recordOf("schema",
+                                    Schema.Field.of("nested_string_array", Schema.arrayOf(
+                                      Schema.arrayOf(Schema.of(Schema.Type.STRING)))),
+                                    Schema.Field.of("nested_int_array", Schema.arrayOf(
+                                      Schema.arrayOf(Schema.of(Schema.Type.INT)))),
+                                    Schema.Field.of("nested_bytes_array", Schema.arrayOf(
+                                      Schema.arrayOf(Schema.of(Schema.Type.BYTES))))
+    );
+
+    List<List<String>> stringArray = Arrays.asList(
+      Arrays.asList("1", "2", "3"),
+      Arrays.asList("1", "2", "3"),
+      Arrays.asList("1", "2", "3")
+    );
+
+    List<List<Integer>> intArray = Arrays.asList(
+      Arrays.asList(1, 2, 3),
+      Arrays.asList(1, 2, 3),
+      Arrays.asList(1, 2, 3)
+    );
+
+    List<List<byte[]>> bytesArray = Arrays.asList(
+      Arrays.asList("1".getBytes(), "2".getBytes(), "3".getBytes()),
+      Arrays.asList("1".getBytes(), "2".getBytes(), "3".getBytes()),
+      Arrays.asList("1".getBytes(), "2".getBytes(), "3".getBytes())
+    );
+
+    StructuredRecord inputRecord = StructuredRecord.builder(schema)
+      .set("nested_string_array", stringArray)
+      .set("nested_int_array", intArray)
+      .set("nested_bytes_array", bytesArray)
+      .build();
+
+    BSONWritable bsonWritable = TRANSFORMER.transform(inputRecord);
+    BSONObject bsonObject = bsonWritable.getDoc();
+
+    Assert.assertEquals(inputRecord.get("nested_string_array"), bsonObject.get("nested_string_array"));
+    Assert.assertEquals(inputRecord.get("nested_int_array"), bsonObject.get("nested_int_array"));
+    Assert.assertEquals(inputRecord.get("nested_bytes_array"), bsonObject.get("nested_bytes_array"));
+  }
+
+  @Test
+  public void testTransformComplexNestedArrays() {
+
+    Schema nestedRecordSchema = Schema.recordOf("nested_object",
+                                                Schema.Field.of("nested_string_field", Schema.of(Schema.Type.STRING)),
+                                                Schema.Field.of("nested_decimal_field", Schema.decimalOf(4, 2)));
+    Schema schema = Schema.recordOf("schema",
+                                    Schema.Field.of("nested_array_of_maps", Schema.arrayOf(
+                                      Schema.arrayOf(Schema.mapOf(Schema.of(Schema.Type.STRING),
+                                                                  Schema.of(Schema.Type.STRING))))),
+                                    Schema.Field.of("nested_array_of_records", Schema.arrayOf(
+                                      Schema.arrayOf(nestedRecordSchema)))
+    );
+
+    List<List<Map<String, String>>> arrayOfMaps = Arrays.asList(
+      Collections.singletonList(ImmutableMap.<String, String>builder().put("k1", "v1").build()),
+      Collections.singletonList(ImmutableMap.<String, String>builder().put("k2", "v2").build()),
+      Collections.singletonList(ImmutableMap.<String, String>builder().put("k3", "v3").build())
+    );
+
+    List<List<StructuredRecord>> arrayOfRecords = Arrays.asList(
+      Collections.singletonList(
+        StructuredRecord.builder(nestedRecordSchema)
+          .set("nested_string_field", "some value")
+          .setDecimal("nested_decimal_field", new BigDecimal("12.34"))
+          .build()
+      ),
+
+      Collections.singletonList(
+        StructuredRecord.builder(nestedRecordSchema)
+          .set("nested_string_field", "some value")
+          .setDecimal("nested_decimal_field", new BigDecimal("10.00"))
+          .build()
+      ),
+
+      Collections.singletonList(
+        StructuredRecord.builder(nestedRecordSchema)
+          .set("nested_string_field", "some value")
+          .setDecimal("nested_decimal_field",  new BigDecimal("10.01"))
+          .build()
+      )
+    );
+
+    StructuredRecord inputRecord = StructuredRecord.builder(schema)
+      .set("nested_array_of_maps", arrayOfMaps)
+      .set("nested_array_of_records", arrayOfRecords)
+      .build();
+
+    BSONWritable bsonWritable = TRANSFORMER.transform(inputRecord);
+    BSONObject bsonObject = bsonWritable.getDoc();
+
+    Assert.assertEquals(inputRecord.get("nested_array_of_maps"), bsonObject.get("nested_array_of_maps"));
+
+    // Nested records must be transformed to a BSONObject as a regular ones
+    List actualArrayOfRecords = (List) bsonObject.get("nested_array_of_records");
+    Assert.assertEquals(TRANSFORMER.transform(arrayOfRecords.get(0).get(0)).getDoc(),
+                        ((List) actualArrayOfRecords.get(0)).get(0));
+
+    Assert.assertEquals(TRANSFORMER.transform(arrayOfRecords.get(1).get(0)).getDoc(),
+                        ((List) actualArrayOfRecords.get(1)).get(0));
+
+    Assert.assertEquals(TRANSFORMER.transform(arrayOfRecords.get(2).get(0)).getDoc(),
+                        ((List) actualArrayOfRecords.get(2)).get(0));
   }
 }

@@ -48,6 +48,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * A {@link BatchSink} that writes data to MongoDB.
@@ -61,10 +62,17 @@ public class MongoDBBatchSink extends ReferenceBatchSink<StructuredRecord, NullW
 
   private final MongoDBConfig config;
   private RecordToBSONWritableTransformer transformer;
-  private static final Set<Schema.Type> SUPPORTED_FIELD_TYPES = ImmutableSet.of(Schema.Type.ARRAY, Schema.Type.BOOLEAN,
-                                                                                Schema.Type.BYTES, Schema.Type.STRING,
-                                                                                Schema.Type.DOUBLE, Schema.Type.FLOAT,
-                                                                                Schema.Type.INT, Schema.Type.LONG);
+  private static final Set<Schema.Type> SUPPORTED_SIMPLE_TYPES = ImmutableSet.of(Schema.Type.ARRAY, Schema.Type.BOOLEAN,
+                                                                                 Schema.Type.BYTES, Schema.Type.STRING,
+                                                                                 Schema.Type.DOUBLE, Schema.Type.FLOAT,
+                                                                                 Schema.Type.INT, Schema.Type.LONG,
+                                                                                 Schema.Type.RECORD, Schema.Type.ENUM,
+                                                                                 Schema.Type.MAP, Schema.Type.UNION);
+
+  private static final Set<Schema.LogicalType> SUPPORTED_LOGICAL_TYPES = ImmutableSet.of(
+    Schema.LogicalType.DATE, Schema.LogicalType.DECIMAL, Schema.LogicalType.TIME_MILLIS, Schema.LogicalType.TIME_MICROS,
+    Schema.LogicalType.TIMESTAMP_MILLIS, Schema.LogicalType.TIMESTAMP_MICROS);
+
   public MongoDBBatchSink(MongoDBConfig config) {
     super(new ReferencePluginConfig(config.referenceName));
     this.config = config;
@@ -112,15 +120,21 @@ public class MongoDBBatchSink extends ReferenceBatchSink<StructuredRecord, NullW
       throw new InvalidStageException("Input schema should contain fields");
     }
     for (Schema.Field field : fields) {
-      Schema.Type fieldType = field.getSchema().isNullable() ?
-        field.getSchema().getNonNullable().getType() : field.getSchema().getType();
-      if (!SUPPORTED_FIELD_TYPES.contains(fieldType)) {
-        String supportedTypes = SUPPORTED_FIELD_TYPES.stream()
+      Schema nonNullableSchema = field.getSchema().isNullable() ? field.getSchema().getNonNullable()
+        : field.getSchema();
+      if (!SUPPORTED_SIMPLE_TYPES.contains(nonNullableSchema.getType()) &&
+        !SUPPORTED_LOGICAL_TYPES.contains(nonNullableSchema.getLogicalType())) {
+        String supportedTypes = Stream.concat(SUPPORTED_SIMPLE_TYPES.stream(), SUPPORTED_LOGICAL_TYPES.stream())
           .map(Enum::name)
           .map(String::toLowerCase)
           .collect(Collectors.joining(", "));
+
+        String actualTypeName = nonNullableSchema.getLogicalType() != null
+          ? nonNullableSchema.getLogicalType().name().toLowerCase()
+          : nonNullableSchema.getType().name().toLowerCase();
+
         String errorMessage = String.format("Field '%s' is of unsupported type '%s'. Supported types are: %s.",
-                                            field.getName(), fieldType, supportedTypes);
+                                            field.getName(), actualTypeName, supportedTypes);
         throw new InvalidStageException(errorMessage);
       }
     }
