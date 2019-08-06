@@ -13,22 +13,20 @@
  * License for the specific language governing permissions and limitations under
  * the License.
  */
-package io.cdap.plugin.batch;
-
-import io.cdap.plugin.MongoDBConfig;
+package io.cdap.plugin.batch.sink;
 
 /**
- * Builder class that provides handy methods to construct {@link MongoDBConfig} for testing.
+ * Builder class that provides handy methods to construct {@link MongoDBBatchSink.MongoDBSinkConfig} for testing.
  */
-public class MongoDBConfigBuilder {
+public class MongoDBSinkConfigBuilder {
 
-  protected final MongoDBConfig config;
+  protected final MongoDBBatchSink.MongoDBSinkConfig config;
 
-  public static MongoDBConfigBuilder builder() {
-    return new MongoDBConfigBuilder(new MongoDBConfig());
+  public static MongoDBSinkConfigBuilder builder() {
+    return new MongoDBSinkConfigBuilder(new MongoDBBatchSink.MongoDBSinkConfig());
   }
 
-  public static MongoDBConfigBuilder builder(MongoDBConfig original) {
+  public static MongoDBSinkConfigBuilder builder(MongoDBBatchSink.MongoDBSinkConfig original) {
     return builder()
       .setReferenceName(original.referenceName)
       .setHost(original.host)
@@ -37,54 +35,60 @@ public class MongoDBConfigBuilder {
       .setCollection(original.collection)
       .setUser(original.user)
       .setPassword(original.password)
-      .setConnectionArguments(original.connectionArguments);
+      .setConnectionArguments(original.connectionArguments)
+      .setIdField(original.idField);
   }
 
-  public MongoDBConfigBuilder(MongoDBConfig config) {
+  public MongoDBSinkConfigBuilder(MongoDBBatchSink.MongoDBSinkConfig config) {
     this.config = config;
   }
 
-  public MongoDBConfigBuilder setReferenceName(String referenceName) {
+  public MongoDBSinkConfigBuilder setReferenceName(String referenceName) {
     this.config.referenceName = referenceName;
     return this;
   }
 
-  public MongoDBConfigBuilder setHost(String host) {
+  public MongoDBSinkConfigBuilder setHost(String host) {
     this.config.host = host;
     return this;
   }
 
-  public MongoDBConfigBuilder setPort(Integer port) {
+  public MongoDBSinkConfigBuilder setPort(Integer port) {
     this.config.port = port;
     return this;
   }
 
-  public MongoDBConfigBuilder setDatabase(String database) {
+  public MongoDBSinkConfigBuilder setDatabase(String database) {
     this.config.database = database;
     return this;
   }
 
-  public MongoDBConfigBuilder setCollection(String collection) {
+  public MongoDBSinkConfigBuilder setCollection(String collection) {
     this.config.collection = collection;
     return this;
   }
 
-  public MongoDBConfigBuilder setUser(String user) {
+  public MongoDBSinkConfigBuilder setUser(String user) {
     this.config.user = user;
     return this;
   }
 
-  public MongoDBConfigBuilder setPassword(String password) {
+  public MongoDBSinkConfigBuilder setPassword(String password) {
     this.config.password = password;
     return this;
   }
 
-  public MongoDBConfigBuilder setConnectionArguments(String connectionArguments) {
+  public MongoDBSinkConfigBuilder setConnectionArguments(String connectionArguments) {
     this.config.connectionArguments = connectionArguments;
     return this;
   }
 
-  public MongoDBConfig build() {
+  public MongoDBSinkConfigBuilder setIdField(String idField) {
+    this.config.idField = idField;
+    return this;
+  }
+
+  public MongoDBBatchSink.MongoDBSinkConfig build() {
     return this.config;
   }
 }

@@ -14,7 +14,7 @@
  * the License.
  */
 
-package io.cdap.plugin.batch;
+package io.cdap.plugin.batch.sink;
 
 import io.cdap.cdap.etl.api.validation.InvalidConfigPropertyException;
 import io.cdap.plugin.MongoDBConfig;
@@ -26,10 +26,10 @@ import org.junit.Test;
 /**
  * Tests of {@link MongoDBConfig} methods.
  */
-public class MongoDBConfigTest {
+public class MongoDBSinkConfigTest {
 
-  private static final MongoDBConfig VALID_CONFIG = MongoDBConfigBuilder.builder()
-    .setReferenceName("MongoDBSource")
+  private static final MongoDBBatchSink.MongoDBSinkConfig VALID_CONFIG = MongoDBSinkConfigBuilder.builder()
+    .setReferenceName("MongoDBSink")
     .setHost("localhost")
     .setPort(27017)
     .setDatabase("admin")
@@ -47,7 +47,7 @@ public class MongoDBConfigTest {
 
   @Test
   public void testConfigConnectionStringNoCreds() {
-    String connectionString = MongoDBConfigBuilder.builder(VALID_CONFIG)
+    String connectionString = MongoDBSinkConfigBuilder.builder(VALID_CONFIG)
       .setUser(null)
       .setPassword(null)
       .build()
@@ -64,7 +64,7 @@ public class MongoDBConfigTest {
   @Test
   public void testValidateReferenceNameNull() {
     try {
-      MongoDBConfigBuilder.builder(VALID_CONFIG)
+      MongoDBSinkConfigBuilder.builder(VALID_CONFIG)
         .setReferenceName(null)
         .build()
         .validate();
@@ -77,7 +77,7 @@ public class MongoDBConfigTest {
   @Test
   public void testValidateReferenceNameEmpty() {
     try {
-      MongoDBConfigBuilder.builder(VALID_CONFIG)
+      MongoDBSinkConfigBuilder.builder(VALID_CONFIG)
         .setReferenceName("")
         .build()
         .validate();
@@ -90,7 +90,7 @@ public class MongoDBConfigTest {
   @Test
   public void testValidateReferenceNameInvalid() {
     try {
-      MongoDBConfigBuilder.builder(VALID_CONFIG)
+      MongoDBSinkConfigBuilder.builder(VALID_CONFIG)
         .setReferenceName("**********")
         .build()
         .validate();
@@ -103,7 +103,7 @@ public class MongoDBConfigTest {
   @Test
   public void testValidateHostNull() {
     try {
-      MongoDBConfigBuilder.builder(VALID_CONFIG)
+      MongoDBSinkConfigBuilder.builder(VALID_CONFIG)
         .setHost(null)
         .build()
         .validate();
@@ -116,7 +116,7 @@ public class MongoDBConfigTest {
   @Test
   public void testValidateHostEmpty() {
     try {
-      MongoDBConfigBuilder.builder(VALID_CONFIG)
+      MongoDBSinkConfigBuilder.builder(VALID_CONFIG)
         .setHost("")
         .build()
         .validate();
@@ -129,7 +129,7 @@ public class MongoDBConfigTest {
   @Test
   public void testValidatePortNull() {
     try {
-      MongoDBConfigBuilder.builder(VALID_CONFIG)
+      MongoDBSinkConfigBuilder.builder(VALID_CONFIG)
         .setPort(null)
         .build()
         .validate();
@@ -142,7 +142,7 @@ public class MongoDBConfigTest {
   @Test
   public void testValidatePortInvalid() {
     try {
-      MongoDBConfigBuilder.builder(VALID_CONFIG)
+      MongoDBSinkConfigBuilder.builder(VALID_CONFIG)
         .setPort(0)
         .build()
         .validate();
@@ -155,7 +155,7 @@ public class MongoDBConfigTest {
   @Test
   public void testValidateDatabaseNull() {
     try {
-      MongoDBConfigBuilder.builder(VALID_CONFIG)
+      MongoDBSinkConfigBuilder.builder(VALID_CONFIG)
         .setDatabase(null)
         .build()
         .validate();
@@ -168,7 +168,7 @@ public class MongoDBConfigTest {
   @Test
   public void testValidateDatabaseEmpty() {
     try {
-      MongoDBConfigBuilder.builder(VALID_CONFIG)
+      MongoDBSinkConfigBuilder.builder(VALID_CONFIG)
         .setDatabase("")
         .build()
         .validate();
@@ -181,7 +181,7 @@ public class MongoDBConfigTest {
   @Test
   public void testValidateCollectionNull() {
     try {
-      MongoDBConfigBuilder.builder(VALID_CONFIG)
+      MongoDBSinkConfigBuilder.builder(VALID_CONFIG)
         .setCollection(null)
         .build()
         .validate();
@@ -194,7 +194,7 @@ public class MongoDBConfigTest {
   @Test
   public void testValidateCollectionEmpty() {
     try {
-      MongoDBConfigBuilder.builder(VALID_CONFIG)
+      MongoDBSinkConfigBuilder.builder(VALID_CONFIG)
         .setCollection("")
         .build()
         .validate();

@@ -37,6 +37,7 @@ import io.cdap.cdap.etl.api.validation.InvalidConfigPropertyException;
 import io.cdap.plugin.ErrorHandling;
 import io.cdap.plugin.MongoDBConfig;
 import io.cdap.plugin.MongoDBConstants;
+import io.cdap.plugin.MongoDBUtil;
 import io.cdap.plugin.common.LineageRecorder;
 import io.cdap.plugin.common.ReferenceBatchSource;
 import io.cdap.plugin.common.ReferencePluginConfig;
@@ -51,7 +52,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import javax.annotation.Nullable;
 
 /**
@@ -222,30 +222,10 @@ public class MongoDBBatchSource extends ReferenceBatchSource<Object, BSONObject,
           throw new InvalidConfigPropertyException("Schema must be specified", MongoDBConstants.SCHEMA);
         }
         Schema parsedSchema = getSchema();
-        List<Schema.Field> fields = parsedSchema.getFields();
-        if (fields == null || fields.isEmpty()) {
-          throw new InvalidConfigPropertyException("Schema should contain fields to map", MongoDBConstants.SCHEMA);
-        }
-        for (Schema.Field field : fields) {
-
-          Schema nonNullableSchema = field.getSchema().isNullable() ? field.getSchema().getNonNullable()
-            : field.getSchema();
-
-          if (!SUPPORTED_SIMPLE_TYPES.contains(nonNullableSchema.getType()) &&
-            !SUPPORTED_LOGICAL_TYPES.contains(nonNullableSchema.getLogicalType())) {
-            String supportedTypes = Stream.concat(SUPPORTED_SIMPLE_TYPES.stream(), SUPPORTED_LOGICAL_TYPES.stream())
-              .map(Enum::name)
-              .map(String::toLowerCase)
-              .collect(Collectors.joining(", "));
-
-            String actualTypeName = nonNullableSchema.getLogicalType() != null
-              ? nonNullableSchema.getLogicalType().name().toLowerCase()
-              : nonNullableSchema.getType().name().toLowerCase();
-
-            String errorMessage = String.format("Field '%s' is of unsupported type '%s'. Supported types are: %s. ",
-                                                field.getName(), actualTypeName, supportedTypes);
-            throw new InvalidConfigPropertyException(errorMessage, MongoDBConstants.SCHEMA);
-          }
+        try {
+          MongoDBUtil.validateSchema(parsedSchema, SUPPORTED_LOGICAL_TYPES, SUPPORTED_SIMPLE_TYPES);
+        } catch (IllegalArgumentException e) {
+          throw new InvalidConfigPropertyException(e.getMessage(), e, MongoDBConstants.SCHEMA);
         }
       }
     }

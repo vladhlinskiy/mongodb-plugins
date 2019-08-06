@@ -3,7 +3,7 @@
 
 Description
 -----------
-Converts a StructuredRecord into a BSONWritable and then writes it to a MongoDB collection.
+This sink writes to a MongoDB collection.
 
 
 Configuration

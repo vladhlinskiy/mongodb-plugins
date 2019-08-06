@@ -83,7 +83,7 @@ public class MongoDBConfig extends PluginConfig {
   public void validate() {
     if (!containsMacro(Constants.Reference.REFERENCE_NAME) && Strings.isNullOrEmpty(referenceName)) {
       throw new InvalidConfigPropertyException("Reference name must be specified", Constants.Reference.REFERENCE_NAME);
-    } else {
+    } else if (!containsMacro(Constants.Reference.REFERENCE_NAME)) {
       try {
         IdUtils.validateId(referenceName);
       } catch (IllegalArgumentException e) {

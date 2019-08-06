@@ -39,7 +39,6 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
@@ -50,17 +49,17 @@ public class RecordToBSONWritableTransformer {
 
   private static final String DEFAULT_ID_FIELD_NAME = "_id";
 
-  private String idField;
+  private String idFieldName;
 
   public RecordToBSONWritableTransformer() {
   }
 
   /**
-   * @param idField specifies which of the incoming fields should be used as an document identifier. Identifier will
+   * @param idFieldName specifies which of the incoming fields should be used as an document identifier. Identifier will
    *                be generated if no value is specified.
    */
-  public RecordToBSONWritableTransformer(@Nullable String idField) {
-    this.idField = idField;
+  public RecordToBSONWritableTransformer(@Nullable String idFieldName) {
+    this.idFieldName = idFieldName;
   }
 
   /**
@@ -70,43 +69,38 @@ public class RecordToBSONWritableTransformer {
    * @return {@link BSONWritable} that corresponds to the given {@link StructuredRecord}.
    */
   public BSONWritable transform(StructuredRecord original) {
-    StructuredRecord record = Strings.isNullOrEmpty(idField) || DEFAULT_ID_FIELD_NAME.equals(idField) ? original :
-      createRecordWithId(original);
+    StructuredRecord record = Strings.isNullOrEmpty(idFieldName) || DEFAULT_ID_FIELD_NAME.equals(idFieldName) ?
+      original : createRecordWithId(original);
     return new BSONWritable(extractRecord(record, DEFAULT_ID_FIELD_NAME));
   }
 
   private StructuredRecord createRecordWithId(StructuredRecord original) {
-    Optional<Schema.Field> idFieldOptional = Objects.requireNonNull(original.getSchema().getFields()).stream()
-      .filter(field -> idField.equals(field.getName()))
-      .findAny();
+    Schema.Field idField = original.getSchema().getField(idFieldName);
 
-    if (!idFieldOptional.isPresent()) {
-      throw new UnexpectedFormatException(String.format("Record does not contain identifier field '%s'.", idField));
+    if (idField == null) {
+      throw new UnexpectedFormatException(String.format("Record does not contain identifier field '%s'.", idFieldName));
     }
 
-    Optional<Schema.Field> defaultIdFieldOptional = Objects.requireNonNull(original.getSchema().getFields()).stream()
-      .filter(field -> DEFAULT_ID_FIELD_NAME.equals(field.getName()))
-      .findAny();
-
-    if (idFieldOptional.isPresent() && defaultIdFieldOptional.isPresent()) {
+    Schema.Field defaultIdField = original.getSchema().getField(DEFAULT_ID_FIELD_NAME);
+    if (defaultIdField != null) {
       throw new UnexpectedFormatException(String.format("Record already contains identifier field '%s'.",
                                                         DEFAULT_ID_FIELD_NAME));
     }
 
     List<Schema.Field> copiedFields = Objects.requireNonNull(original.getSchema().getFields()).stream()
-      .filter(field -> !idField.equals(field.getName()))
+      .filter(field -> !idFieldName.equals(field.getName()))
       .collect(Collectors.toList());
 
     List<Schema.Field> recordWithIdFields = new ArrayList<>();
-    recordWithIdFields.add(Schema.Field.of(DEFAULT_ID_FIELD_NAME, idFieldOptional.get().getSchema()));
+    recordWithIdFields.add(Schema.Field.of(DEFAULT_ID_FIELD_NAME, idField.getSchema()));
     recordWithIdFields.addAll(copiedFields);
 
     String recordName = Objects.requireNonNull(original.getSchema().getRecordName(), "Record name can not be empty");
     Schema recordWithIdSchema = Schema.recordOf(recordName, recordWithIdFields);
     StructuredRecord.Builder builder = StructuredRecord.builder(recordWithIdSchema);
     for (Schema.Field field : original.getSchema().getFields()) {
-      if (idField.equals(field.getName())) {
-        builder.set(DEFAULT_ID_FIELD_NAME, original.get(idField));
+      if (idFieldName.equals(field.getName())) {
+        builder.set(DEFAULT_ID_FIELD_NAME, original.get(idFieldName));
         continue;
       }
 
@@ -199,7 +193,6 @@ public class RecordToBSONWritableTransformer {
       case FLOAT:
         return (Float) value;
       case BYTES:
-        // TODO handle ID field properly
         if (value instanceof ByteBuffer) {
           return Bytes.getBytes((ByteBuffer) value);
         } else {
@@ -208,7 +201,6 @@ public class RecordToBSONWritableTransformer {
       case LONG:
         return (Long) value;
       case STRING:
-        // TODO handle ID field properly
         return (String) value;
       case MAP:
         return extractMap(value, nonNullableSchema);
@@ -279,22 +271,22 @@ public class RecordToBSONWritableTransformer {
       .map(Schema::getType)
       .collect(Collectors.toList());
     // Extract values of types that can not be written directly or may contain nested values of such types
-    if (unionTypes.indexOf(Schema.Type.BYTES) != -1 || value instanceof ByteBuffer) {
+    if (unionTypes.indexOf(Schema.Type.BYTES) != -1 && value instanceof ByteBuffer) {
       // ByteBuffer -> byte[] conversion required
       int schemaIndex = unionTypes.indexOf(Schema.Type.BYTES);
-      extractValue(value, schema.getUnionSchema(schemaIndex));
-    } else if (unionTypes.indexOf(Schema.Type.ENUM) != -1 || value instanceof String) {
+      return extractValue(value, schema.getUnionSchema(schemaIndex));
+    } else if (unionTypes.indexOf(Schema.Type.ENUM) != -1 && value instanceof String) {
       // Enum validation required
       int schemaIndex = unionTypes.indexOf(Schema.Type.ENUM);
-      extractValue(value, schema.getUnionSchema(schemaIndex));
-    } else if (unionTypes.indexOf(Schema.Type.ARRAY) != -1 || value instanceof List) {
+      return extractValue(value, schema.getUnionSchema(schemaIndex));
+    } else if (unionTypes.indexOf(Schema.Type.ARRAY) != -1 && value instanceof List) {
       int schemaIndex = unionTypes.indexOf(Schema.Type.ARRAY);
-      extractArray(value, schema.getUnionSchema(schemaIndex));
-    } else if (unionTypes.indexOf(Schema.Type.MAP) != -1 || value instanceof Map) {
+      return extractArray(value, schema.getUnionSchema(schemaIndex));
+    } else if (unionTypes.indexOf(Schema.Type.MAP) != -1 && value instanceof Map) {
       int schemaIndex = unionTypes.indexOf(Schema.Type.MAP);
-      extractMap(value, schema.getUnionSchema(schemaIndex));
-    } else if (unionTypes.indexOf(Schema.Type.RECORD) != -1 || value instanceof StructuredRecord) {
-      extractRecord(value, null);
+      return extractMap(value, schema.getUnionSchema(schemaIndex));
+    } else if (unionTypes.indexOf(Schema.Type.RECORD) != -1 && value instanceof StructuredRecord) {
+      return extractRecord(value, null);
     }
 
     return value;

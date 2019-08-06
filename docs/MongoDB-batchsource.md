@@ -4,7 +4,7 @@
 Description
 -----------
 Reads documents from a MongoDB collection and converts each document into a StructuredRecord with the help
-of a specified schema. The user can optionally provide input query, input fields, and splitter classes.
+of a specified schema. The user can optionally provide input query.
 
 
 Configuration

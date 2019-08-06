@@ -35,6 +35,7 @@ import io.cdap.cdap.etl.api.batch.BatchSinkContext;
 import io.cdap.cdap.etl.api.validation.InvalidStageException;
 import io.cdap.plugin.MongoDBConfig;
 import io.cdap.plugin.MongoDBConstants;
+import io.cdap.plugin.MongoDBUtil;
 import io.cdap.plugin.common.LineageRecorder;
 import io.cdap.plugin.common.ReferenceBatchSink;
 import io.cdap.plugin.common.ReferencePluginConfig;
@@ -48,7 +49,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import javax.annotation.Nullable;
 
 /**
@@ -58,7 +58,7 @@ import javax.annotation.Nullable;
  */
 @Plugin(type = BatchSink.PLUGIN_TYPE)
 @Name(MongoDBConstants.PLUGIN_NAME)
-@Description("MongoDB Batch Sink converts a StructuredRecord to a BSONWritable and writes it to MongoDB.")
+@Description("MongoDB Batch Sink writes to a MongoDB collection.")
 public class MongoDBBatchSink extends ReferenceBatchSink<StructuredRecord, NullWritable, BSONWritable> {
 
   private final MongoDBSinkConfig config;
@@ -116,28 +116,10 @@ public class MongoDBBatchSink extends ReferenceBatchSink<StructuredRecord, NullW
   }
 
   private void validateInputSchema(Schema inputSchema) {
-    List<Schema.Field> fields = inputSchema.getFields();
-    if (fields == null || fields.isEmpty()) {
-      throw new InvalidStageException("Input schema should contain fields");
-    }
-    for (Schema.Field field : fields) {
-      Schema nonNullableSchema = field.getSchema().isNullable() ? field.getSchema().getNonNullable()
-        : field.getSchema();
-      if (!SUPPORTED_SIMPLE_TYPES.contains(nonNullableSchema.getType()) &&
-        !SUPPORTED_LOGICAL_TYPES.contains(nonNullableSchema.getLogicalType())) {
-        String supportedTypes = Stream.concat(SUPPORTED_SIMPLE_TYPES.stream(), SUPPORTED_LOGICAL_TYPES.stream())
-          .map(Enum::name)
-          .map(String::toLowerCase)
-          .collect(Collectors.joining(", "));
-
-        String actualTypeName = nonNullableSchema.getLogicalType() != null
-          ? nonNullableSchema.getLogicalType().name().toLowerCase()
-          : nonNullableSchema.getType().name().toLowerCase();
-
-        String errorMessage = String.format("Field '%s' is of unsupported type '%s'. Supported types are: %s.",
-                                            field.getName(), actualTypeName, supportedTypes);
-        throw new InvalidStageException(errorMessage);
-      }
+    try {
+      MongoDBUtil.validateSchema(inputSchema, SUPPORTED_LOGICAL_TYPES, SUPPORTED_SIMPLE_TYPES);
+    } catch (IllegalArgumentException e) {
+      throw new InvalidStageException("Invalid input schema", e);
     }
   }
 

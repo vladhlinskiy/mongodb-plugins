@@ -359,4 +359,50 @@ public class RecordToBSONWritableTransformerTest {
     thrown.expect(UnexpectedFormatException.class);
     new RecordToBSONWritableTransformer("string_field").transform(inputRecord);
   }
+
+  @Test
+  public void testTransformUnionBytes() {
+    Schema schema = Schema.recordOf("schema",
+                                    Schema.Field.of("union_field", Schema.unionOf(
+                                      Schema.of(Schema.Type.STRING),
+                                      Schema.of(Schema.Type.BYTES)
+                                      )));
+
+
+    StructuredRecord inputRecord = StructuredRecord.builder(schema)
+      .set("union_field", ByteBuffer.wrap("bytes".getBytes()))
+      .build();
+
+    BSONWritable bsonWritable = TRANSFORMER.transform(inputRecord);
+    BSONObject bsonObject = bsonWritable.getDoc();
+
+    // ByteBuffer value must be transformed to byte array, since it can not be written directly via BSONWritable
+    Assert.assertTrue(bsonObject.get("union_field") instanceof byte[]);
+    Assert.assertArrayEquals("bytes".getBytes(), (byte[]) bsonObject.get("union_field"));
+  }
+
+  @Test
+  public void testTransformUnionRecord() {
+    Schema recordSchema = Schema.recordOf("nested", Schema.Field.of("bytes_field", Schema.of(Schema.Type.BYTES)));
+    Schema schema = Schema.recordOf("schema", Schema.Field.of("union_field", Schema.unionOf(
+      Schema.of(Schema.Type.STRING), recordSchema)));
+
+    StructuredRecord inputRecord = StructuredRecord.builder(schema)
+      .set("union_field", StructuredRecord.builder(recordSchema)
+        .set("bytes_field", ByteBuffer.wrap("bytes".getBytes()))
+        .build())
+      .build();
+
+    BSONWritable bsonWritable = TRANSFORMER.transform(inputRecord);
+    BSONObject bsonObject = bsonWritable.getDoc();
+
+    Assert.assertTrue(bsonObject.containsField("union_field"));
+    // Record must be transformed to BSONObject
+    Assert.assertTrue(bsonObject.get("union_field") instanceof BSONObject);
+
+    // ByteBuffer value must be transformed to byte array, since it can not be written directly via BSONWritable
+    BSONObject recordActual = (BSONObject) bsonObject.get("union_field");
+    Assert.assertTrue(recordActual.get("bytes_field") instanceof byte[]);
+    Assert.assertArrayEquals("bytes".getBytes(), (byte[]) recordActual.get("bytes_field"));
+  }
 }
