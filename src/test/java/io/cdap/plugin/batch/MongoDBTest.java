@@ -16,6 +16,7 @@
 
 package io.cdap.plugin.batch;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.mongodb.MongoClient;
@@ -88,12 +89,14 @@ import java.math.BigDecimal;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 /**
@@ -201,6 +204,107 @@ public class MongoDBTest extends HydratorTestBase {
       .append("decimal", new BsonDecimal128(Decimal128.parse("0.1234567890")))
   );
 
+  private static final Schema ALL_SINK_DATATYPES_SCHEMA = Schema.recordOf(
+    "document",
+    ImmutableList.<Schema.Field>builder()
+      .addAll(SCHEMA.getFields())
+      .addAll(Arrays.asList(
+        Schema.Field.of("date-field", Schema.of(Schema.LogicalType.DATE)),
+        Schema.Field.of("float", Schema.of(Schema.Type.FLOAT)),
+        Schema.Field.of("time", Schema.of(Schema.LogicalType.TIME_MILLIS)),
+        Schema.Field.of("enum", Schema.enumWith("first", "second")),
+        Schema.Field.of("union", Schema.unionOf(Schema.of(Schema.Type.STRING), NESTED_SCHEMA))
+      )).build()
+  );
+
+  private static final List<StructuredRecord> ALL_SINK_DATATYPES_RECORDS = Arrays.asList(
+    StructuredRecord.builder(ALL_SINK_DATATYPES_SCHEMA)
+      .set("_id", "5d079ee6d078c94008e4bb4a")
+      .set("string", "AAPL")
+      .set("int32", Integer.MIN_VALUE)
+      .set("double", Double.MIN_VALUE)
+      .set("array", Arrays.asList("a1", "a2"))
+      .set("object", StructuredRecord.builder(NESTED_SCHEMA).set("inner_field", "val").build())
+      .set("object-to-map", ImmutableMap.builder().put("key", "value").build())
+      .set("binary", "binary data".getBytes())
+      .set("boolean", false)
+      .setTimestamp("date", DATE_TIME)
+      .set("long", Long.MIN_VALUE)
+      .setDecimal("decimal", new BigDecimal("987654321.1234567890"))
+      .setDate("date-field", DATE_TIME.toLocalDate())
+      .set("float", Float.MIN_VALUE)
+      .setTime("time", DATE_TIME.toLocalTime())
+      .set("enum", "first")
+      .set("union", StructuredRecord.builder(NESTED_SCHEMA).set("inner_field", "val").build())
+      .build(),
+
+    StructuredRecord.builder(ALL_SINK_DATATYPES_SCHEMA)
+      .set("_id", "5d079ee6d078c94008e4bb47")
+      .set("string", "AAPL")
+      .set("int32", 10)
+      .set("double", 23.23)
+      .set("array", Arrays.asList("a1", "a2"))
+      .set("object", StructuredRecord.builder(NESTED_SCHEMA).set("inner_field", "val").build())
+      .set("object-to-map", ImmutableMap.builder().put("key", "value").build())
+      .set("binary", "binary data".getBytes())
+      .set("boolean", false)
+      .setTimestamp("date", DATE_TIME)
+      .set("long", Long.MAX_VALUE)
+      .setDecimal("decimal", new BigDecimal("0.1234567890"))
+      .setDate("date-field", DATE_TIME.toLocalDate())
+      .set("float", Float.MIN_VALUE)
+      .setTime("time", DATE_TIME.toLocalTime())
+      .set("enum", "second")
+      .set("union", "string")
+      .build()
+  );
+
+  private static final BiConsumer<StructuredRecord, BsonDocument> COMPARE_COMMON = (expected, actual) -> {
+    Assert.assertEquals(expected.get("string"), actual.getString("string").getValue());
+    Assert.assertEquals((int) expected.get("int32"), actual.getInt32("int32").getValue());
+    Assert.assertEquals(expected.<Double>get("double"), actual.getDouble("double").getValue(), 0.00001);
+    Assert.assertArrayEquals(expected.get("binary"), actual.getBinary("binary").getData());
+    Assert.assertEquals((long) expected.get("long"), actual.getInt64("long").getValue());
+    Assert.assertEquals(expected.get("boolean"), actual.getBoolean("boolean").getValue());
+
+    Assert.assertEquals(expected.get("array"),
+                        actual.getArray("array").getValues().stream()
+                          .map(BsonValue::asString)
+                          .map(BsonString::getValue)
+                          .collect(Collectors.toList()));
+
+    Assert.assertEquals(expected.<StructuredRecord>get("object").get("inner_field"),
+                        actual.getDocument("object").getString("inner_field").getValue());
+
+    Map<String, String> actualMap = actual.getDocument("object-to-map").entrySet().stream()
+      .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().asString().getValue()));
+
+    Assert.assertEquals(expected.get("object-to-map"), actualMap);
+
+    Assert.assertEquals(expected.getTimestamp("date").toInstant().toEpochMilli(),
+                        actual.getDateTime("date").getValue());
+
+    Assert.assertEquals(expected.getDecimal("decimal"),
+                        actual.getDecimal128("decimal").getValue().bigDecimalValue());
+  };
+
+  private static final BiConsumer<StructuredRecord, BsonDocument> COMPARE_SINK_DATA_TYPES = (expected, actual) -> {
+    Assert.assertEquals(expected.getDate("date-field").atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli(),
+                        actual.getDateTime("date-field").getValue());
+    Assert.assertEquals(expected.<Float>get("float"), actual.getDouble("float").getValue(), 0.00001);
+    Assert.assertEquals(expected.get("enum"), actual.getString("enum").getValue());
+    Assert.assertEquals(expected.getTime("time").toString(), actual.getString("time").getValue());
+    // If actual value is a record
+    if (expected.get("union") instanceof StructuredRecord) {
+      Assert.assertEquals(expected.<StructuredRecord>get("union").get("inner_field"),
+                          actual.getDocument("union").getString("inner_field").getValue());
+    }
+    // If actual value is a string
+    if (expected.get("union") instanceof String) {
+      Assert.assertEquals(expected.get("union"), actual.getString("union").getValue());
+    }
+  };
+
   private static final MongodStarter starter = MongodStarter.getDefaultInstance();
   private MongodExecutable mongodExecutable;
   private MongodProcess mongod;
@@ -288,14 +392,16 @@ public class MongoDBTest extends HydratorTestBase {
 
 
     DataSetManager<Table> inputManager = getDataset(inputDatasetName);
-    MockSource.writeInput(inputManager, TEST_RECORDS);
+    MockSource.writeInput(inputManager, ALL_SINK_DATATYPES_RECORDS);
 
     WorkflowManager workflowManager = appManager.getWorkflowManager(SmartWorkflow.NAME);
     workflowManager.start();
     workflowManager.waitForRuns(ProgramRunStatus.COMPLETED, 1, 5, TimeUnit.MINUTES);
 
-    verifyMongoSinkData(MONGO_SINK_COLLECTIONS);
-    verifyMongoSinkData(secondCollectionName);
+    verifyMongoSinkData(MONGO_SINK_COLLECTIONS, ALL_SINK_DATATYPES_RECORDS,
+                        Arrays.asList(COMPARE_COMMON, COMPARE_SINK_DATA_TYPES));
+    verifyMongoSinkData(secondCollectionName, ALL_SINK_DATATYPES_RECORDS,
+                        Arrays.asList(COMPARE_COMMON, COMPARE_SINK_DATA_TYPES));
   }
 
   @Test
@@ -333,7 +439,7 @@ public class MongoDBTest extends HydratorTestBase {
     workflowManager.start();
     workflowManager.waitForRuns(ProgramRunStatus.COMPLETED, 1, 5, TimeUnit.MINUTES);
 
-    verifyMongoSinkData(MONGO_SINK_COLLECTIONS);
+    verifyMongoSinkData(MONGO_SINK_COLLECTIONS, TEST_RECORDS, Collections.singletonList(COMPARE_COMMON));
   }
 
   @SuppressWarnings("ConstantConditions")
@@ -406,43 +512,19 @@ public class MongoDBTest extends HydratorTestBase {
     }
   }
 
-  private void verifyMongoSinkData(String collectionName) throws Exception {
+  private void verifyMongoSinkData(String collectionName, List<StructuredRecord> expectedRecords,
+                                   List<BiConsumer<StructuredRecord, BsonDocument>> testActions) throws Exception {
     MongoDatabase mongoDatabase = mongoClient.getDatabase(MONGO_DB);
     MongoCollection<BsonDocument> documents = mongoDatabase.getCollection(collectionName, BsonDocument.class);
-    Assert.assertEquals(2, documents.count());
+    Assert.assertEquals(expectedRecords.size(), documents.count());
 
-    for (StructuredRecord expected : TEST_RECORDS) {
+    for (StructuredRecord expected : expectedRecords) {
       BsonObjectId expectedId = new BsonObjectId(new ObjectId(expected.<String>get("_id")));
       Iterator<BsonDocument> actualIterator = documents.find(new BsonDocument("_id", expectedId)).iterator();
       Assert.assertTrue(actualIterator.hasNext());
       BsonDocument actual = actualIterator.next();
-
-      Assert.assertEquals(expected.get("string"), actual.getString("string").getValue());
-      Assert.assertEquals((int) expected.get("int32"), actual.getInt32("int32").getValue());
-      Assert.assertEquals(expected.<Double>get("double"), actual.getDouble("double").getValue(), 0.00001);
-      Assert.assertArrayEquals(expected.get("binary"), actual.getBinary("binary").getData());
-      Assert.assertEquals((long) expected.get("long"), actual.getInt64("long").getValue());
-      Assert.assertEquals(expected.get("boolean"), actual.getBoolean("boolean").getValue());
-
-      Assert.assertEquals(expected.get("array"),
-                          actual.getArray("array").getValues().stream()
-                            .map(BsonValue::asString)
-                            .map(BsonString::getValue)
-                            .collect(Collectors.toList()));
-
-      Assert.assertEquals(expected.<StructuredRecord>get("object").get("inner_field"),
-                          actual.getDocument("object").getString("inner_field").getValue());
-
-      Map<String, String> actualMap = actual.getDocument("object-to-map").entrySet().stream()
-        .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().asString().getValue()));
-
-      Assert.assertEquals(expected.get("object-to-map"), actualMap);
-
-      Assert.assertEquals(expected.getTimestamp("date").toInstant().toEpochMilli(),
-                          actual.getDateTime("date").getValue());
-
-      Assert.assertEquals(expected.getDecimal("decimal"),
-                          actual.getDecimal128("decimal").getValue().bigDecimalValue());
+      // Perform supplied test actions
+      testActions.forEach(test -> test.accept(expected, actual));
     }
   }
 

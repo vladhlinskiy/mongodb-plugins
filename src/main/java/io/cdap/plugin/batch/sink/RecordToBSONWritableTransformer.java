@@ -166,7 +166,7 @@ public class RecordToBSONWritableTransformer {
     if (value instanceof byte[]) {
       return new ObjectId((byte[]) value);
     } else if (value instanceof ByteBuffer) {
-      byte[] idBytes = Bytes.getBytes((ByteBuffer) value);
+      byte[] idBytes = ((ByteBuffer) value).array();
       return new ObjectId(idBytes);
     } else if (value instanceof String) {
       return new ObjectId((String) value);

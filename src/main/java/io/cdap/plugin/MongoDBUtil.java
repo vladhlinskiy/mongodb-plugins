@@ -35,6 +35,15 @@ public final class MongoDBUtil {
     throw new AssertionError("Should not instantiate static utility class.");
   }
 
+  /**
+   * Validates given input/output schema according the the specified supported types. Fields of types
+   * {@link Schema.Type#RECORD}, {@link Schema.Type#ARRAY}, {@link Schema.Type#MAP} will be validated recursively.
+   *
+   * @param schema                schema to validate.
+   * @param supportedLogicalTypes set of supported logical types.
+   * @param supportedTypes        set of supported types.
+   * @throws IllegalArgumentException in the case when schema is invalid.
+   */
   public static void validateSchema(Schema schema,
                                     Set<Schema.LogicalType> supportedLogicalTypes,
                                     Set<Schema.Type> supportedTypes) {
@@ -88,8 +97,9 @@ public final class MongoDBUtil {
       default:
         if (!isSchemaTypeSupported(nonNullableSchema, supportedLogicalTypes, supportedTypes)) {
           String actualTypeName = logicalType != null ? logicalType.name().toLowerCase() : type.name().toLowerCase();
-          throw new IllegalArgumentException(String.format("Field '%s' is of unsupported type '%s'. Supported types " +
-                                                          "are: %s.", fieldName, actualTypeName, supportedTypeNames));
+          throw new IllegalArgumentException(
+            String.format("Field '%s' is of unsupported type '%s'. Supported types are: %s.", fieldName, actualTypeName,
+                          supportedTypeNames));
         }
     }
   }
@@ -111,7 +121,7 @@ public final class MongoDBUtil {
       String actualTypeName = keyLogicalType != null ? keyLogicalType.name().toLowerCase()
         : keyType.name().toLowerCase();
       throw new IllegalArgumentException(String.format("Key schema must be of type 'string', but was '%s' for map " +
-                                                      "field '%s'.", actualTypeName, fieldName));
+                                                         "field '%s'.", actualTypeName, fieldName));
     }
     validateFieldSchema(fieldName, nonNullableSchema.getMapSchema().getValue(), supportedLogicalTypes, supportedTypes);
   }

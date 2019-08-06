@@ -40,6 +40,11 @@
           "widget-type": "textbox",
           "label": "Collection",
           "name": "collection"
+        },
+        {
+          "widget-type": "textbox",
+          "label": "ID Field",
+          "name": "idField"
         }
       ]
     },
